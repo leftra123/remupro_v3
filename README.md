@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/streamlit/streamlit/develop/components/extras/logo/streamlit-logo-primary-colormark-darktext.svg" alt="Streamlit Logo" width="400"/>
+  <img src="https://streamlit.io/images/brand/streamlit-logo-primary-light-background-svg.svg" alt="Streamlit Logo" width="400"/>
   <br/><br/>
   <h1 style="border-bottom: none;">📊 RemuPro</h1>
   <p><strong>Sistema Inteligente para el Procesamiento de Remuneraciones Educativas</strong></p>
@@ -60,24 +60,67 @@ RemuPro no solo procesa números, sino que también los convierte en **gráficos
 
 ## 🛠️ Instalación y Uso
 
-### Requisitos
-*   **Python 3.8** o superior.
+A continuación se detallan los pasos para instalar y ejecutar RemuPro en macOS y Windows desde cero.
 
-### Pasos
+### Para macOS
 
-1.  **Instalar dependencias:**
-    *(Se recomienda hacerlo en un entorno virtual)*
+1.  **Clonar el Repositorio**
+    Abre la Terminal y ejecuta el siguiente comando. Reemplaza `URL_DEL_REPOSITORIO` con la URL real del repositorio Git.
+    ```bash
+    git clone URL_DEL_REPOSITORIO
+    cd remupro_v3
+    ```
+
+2.  **Crear y Activar Entorno Virtual**
+    Es una buena práctica aislar las dependencias del proyecto.
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+    Verás `(venv)` al principio de la línea de comandos, indicando que el entorno está activo.
+
+3.  **Instalar Dependencias**
+    Instala todas las librerías necesarias con un solo comando.
     ```bash
     pip install -r requirements.txt
     ```
 
-2.  **Ejecutar la aplicación:**
+4.  **Ejecutar RemuPro**
+    ¡Ya está todo listo para lanzar la aplicación!
+    ```bash
+    streamlit run app.py
+    ```
+    La aplicación se abrirá automáticamente en tu navegador web.
+
+### Para Windows
+
+1.  **Clonar el Repositorio**
+    Abre la terminal (CMD o PowerShell) y ejecuta el siguiente comando. Reemplaza `URL_DEL_REPOSITORIO` con la URL real del repositorio Git.
+    ```bash
+    git clone URL_DEL_REPOSITORIO
+    cd remupro_v3
+    ```
+
+2.  **Crear y Activar Entorno Virtual**
+    ```bash
+    python -m venv venv
+    .\\venv\\Scripts\\activate
+    ```
+    Verás `(venv)` al principio de la línea de comandos.
+
+3.  **Instalar Dependencias**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Ejecutar RemuPro (Opción A: Manual)**
+    Lanza la aplicación desde la terminal.
     ```bash
     streamlit run app.py
     ```
 
-3.  **Usuarios de Windows:**
-    Simplemente haz doble clic en el archivo `Iniciar_RemuPro.bat`. Se encargará de todo por ti.
+5.  **Ejecutar RemuPro (Opción B: Automática)**
+    Después de clonar el repositorio, simplemente haz doble clic en el archivo `Iniciar_RemuPro.bat`. Este script instalará las dependencias (la primera vez) y lanzará la aplicación por ti.
 
 ## ⚖️ Licencia y Responsabilidad
 
