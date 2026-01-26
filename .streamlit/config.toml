@@ -1,0 +1,11 @@
+# RemuPro - Configuración de Streamlit
+
+[server]
+headless = true
+port = 8501
+
+[browser]
+gatherUsageStats = false
+
+# No forzar tema - dejar que el usuario elija en Settings
+# El usuario puede cambiar entre Light/Dark en ⋮ → Settings → Theme
