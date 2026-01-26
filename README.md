@@ -65,9 +65,9 @@ A continuación se detallan los pasos para instalar y ejecutar RemuPro en macOS 
 ### Para macOS
 
 1.  **Clonar el Repositorio**
-    Abre la Terminal y ejecuta el siguiente comando. Reemplaza `URL_DEL_REPOSITORIO` con la URL real del repositorio Git.
+    Abre la Terminal y ejecuta el siguiente comando.
     ```bash
-    git clone URL_DEL_REPOSITORIO
+    git clone https://github.com/leftra123/remupro_v3.git
     cd remupro_v3
     ```
 
@@ -95,9 +95,9 @@ A continuación se detallan los pasos para instalar y ejecutar RemuPro en macOS 
 ### Para Windows
 
 1.  **Clonar el Repositorio**
-    Abre la terminal (CMD o PowerShell) y ejecuta el siguiente comando. Reemplaza `URL_DEL_REPOSITORIO` con la URL real del repositorio Git.
+    Abre la terminal (CMD o PowerShell) y ejecuta el siguiente comando.
     ```bash
-    git clone URL_DEL_REPOSITORIO
+    git clone https://github.com/leftra123/remupro_v3.git
     cd remupro_v3
     ```
 
