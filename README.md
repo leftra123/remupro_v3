@@ -16,6 +16,40 @@
 
 **RemuPro** transforma la complejidad del cálculo de remuneraciones en un proceso simple, rápido y visual. Olvídate de las planillas manuales y los errores; esta herramienta automatiza la distribución de la Bonificación de Reconocimiento Profesional (BRP) y procesa las subvenciones SEP y PIE con precisión milimétrica.
 
+## 🗄️ Integración de Base de Datos para Análisis Histórico
+
+RemuPro integra una base de datos **SQLite** (gestionada con **SQLAlchemy**) para el almacenamiento histórico de los procesamientos mensuales de la BRP. Esto permite:
+
+*   **Registro Detallado:** Guarda un registro de cada procesamiento, incluyendo estadísticas generales (`ProcesamientoMensual`) y los datos individuales de cada docente (`DocenteMensual`).
+*   **Análisis Comparativo:** Facilita la comparación de datos entre diferentes meses, identificando tendencias y cambios a lo largo del tiempo.
+*   **Trazabilidad:** Proporciona un historial completo de las distribuciones realizadas.
+
+## 📊 Generación de Informes y Visualizaciones Avanzadas
+
+Más allá de los cálculos, RemuPro se destaca por su capacidad de generar informes comprensivos y visualmente ricos:
+
+*   **Informes Excel Multi-Hoja:** Produce un único archivo Excel con hojas dedicadas para diferentes propósitos:
+    *   `BRP_DISTRIBUIDO`: Detalle completo de la distribución BRP por cada docente.
+    *   `RESUMEN_POR_RBD`: Resumen agregado de los montos BRP por cada establecimiento educacional.
+    *   `RESUMEN_GENERAL`: Un dashboard ejecutivo con las cifras clave del procesamiento.
+    *   `REVISAR`: Una hoja crucial para las "Alertas Tempranas" que detalla los casos que requieren atención manual.
+*   **Informes Word Detallados:** Genera documentos Word que incluyen:
+    *   Un resumen ejecutivo claro.
+    *   Visualizaciones gráficas (creadas con Matplotlib) para una mejor comprensión de la distribución.
+    *   Un registro de auditoría (`AuditLog`) del procesamiento.
+    *   Análisis comparativos mensuales para resaltar cambios significativos.
+*   **Registro de Auditoría Estructurado (`AuditLog`):** Un sistema interno que registra cada evento, advertencia o error durante el procesamiento, facilitando la depuración y la revisión de cualquier anomalía.
+
+## 🚨 Sistema de Alertas Tempranas Robusto
+
+RemuPro incorpora un sofisticado sistema de alertas para identificar y señalar proactivamente posibles inconsistencias o situaciones que requieren revisión:
+
+*   **Detección de Horas Excesivas:** Alerta automáticamente si algún docente excede el límite legal de 44 horas de trabajo.
+*   **Docentes sin Liquidación:** Identifica a los docentes que figuran en el archivo del MINEDUC pero no aparecen en los archivos de liquidación de SEP/PIE.
+*   **Cambios Significativos de Monto:** El módulo de comparación mensual detecta variaciones notables (ej. +/- 10%) en los montos BRP de los docentes entre un mes y otro, lo que puede indicar errores o cambios importantes.
+*   **Casos en Revisión (Hoja `REVISAR`):** Todos estos casos son compilados en una hoja específica del informe Excel, así como en el informe Word, para una revisión manual eficiente, categorizados por su nivel de importancia.
+*   **Flags en Base de Datos:** Las inconsistencias y alertas también se registran en la base de datos (ej. `excede_horas`, `requiere_revision`), permitiendo un seguimiento histórico.
+
 ## ✨ Galería: El Poder de los Datos Visuales
 
 RemuPro no solo procesa números, sino que también los convierte en **gráficos interactivos y claros** que facilitan la toma de decisiones. La aplicación genera dashboards dinámicos directamente en la interfaz.
