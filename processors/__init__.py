@@ -7,6 +7,7 @@ from processors.sep import SEPProcessor
 from processors.pie import PIEProcessor
 from processors.duplicados import DuplicadosProcessor
 from processors.brp import BRPProcessor
+from processors.integrado import IntegradoProcessor
 
 __all__ = [
     'BaseProcessor',
@@ -16,4 +17,5 @@ __all__ = [
     'PIEProcessor',
     'DuplicadosProcessor',
     'BRPProcessor',
+    'IntegradoProcessor',
 ]

@@ -1,5 +1,10 @@
-# Gemini
+# AI Assistants
 GEMINI.md
+CLAUDE.md
+
+# RemuPro - Base de datos local (datos sensibles)
+data/
+*.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

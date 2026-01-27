@@ -1,5 +1,5 @@
 """
-RemuPro v2.1 - Sistema de Procesamiento de Remuneraciones Educativas
+RemuPro v2.3 - Sistema de Procesamiento de Remuneraciones Educativas
 Interfaz Web con Streamlit
 """
 
@@ -8,14 +8,20 @@ import pandas as pd
 from pathlib import Path
 from io import BytesIO
 import tempfile
+from datetime import datetime
 
-from processors import SEPProcessor, PIEProcessor, DuplicadosProcessor, BRPProcessor
+from processors import (
+    SEPProcessor, PIEProcessor, DuplicadosProcessor,
+    BRPProcessor, IntegradoProcessor
+)
+from reports import AuditLog, InformeWord
+from database import BRPRepository, ComparadorMeses
 
 # ============================================================================
 # CONFIGURACIÓN
 # ============================================================================
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 st.set_page_config(
     page_title="RemuPro",
@@ -836,50 +842,411 @@ def tab_duplicados():
             )
 
 
+def tab_todo_en_uno():
+    """Pestaña de procesamiento integrado Todo en Uno."""
+
+    with st.expander("📖 ¿Cómo usar esta herramienta?", expanded=False):
+        show_tutorial([
+            ("Carga los 3 archivos BRUTOS", "Arrastra SEP bruto, PIE bruto y web_sostenedor juntos."),
+            ("Indica el mes", "Escribe el período en formato YYYY-MM (ej: 2024-01)."),
+            ("Compara (opcional)", "Activa comparación si tienes meses anteriores guardados."),
+            ("Procesa y descarga", "Obtén Excel procesado e Informe Word con auditoría.")
+        ])
+
+    info_box("Carga los <b>3 archivos BRUTOS</b> (SEP, PIE, web_sostenedor) y el sistema procesará todo automáticamente.")
+
+    st.markdown("---")
+
+    # Inicializar repositorio y estado
+    repo = BRPRepository()
+
+    if 'todouno_files' not in st.session_state:
+        st.session_state.todouno_files = {'sep': None, 'pie': None, 'web': None}
+
+    # Uploader múltiple
+    st.markdown("##### 📥 Cargar Archivos BRUTOS")
+    st.caption("Arrastra los 3 archivos: **SEP bruto**, **PIE bruto** y **web_sostenedor**")
+
+    uploaded_files = st.file_uploader(
+        "Arrastra los 3 archivos Excel",
+        type=['xlsx', 'xls'],
+        accept_multiple_files=True,
+        key="todouno_multi_upload"
+    )
+
+    # Auto-detectar y asignar archivos
+    for f in uploaded_files:
+        name_lower = f.name.lower()
+        if name_lower.startswith('web'):
+            st.session_state.todouno_files['web'] = f
+        elif name_lower.startswith('sep') or 'sep' in name_lower:
+            st.session_state.todouno_files['sep'] = f
+        elif name_lower.startswith('sn') or 'pie' in name_lower or 'normal' in name_lower:
+            st.session_state.todouno_files['pie'] = f
+
+    # Mostrar estado de archivos detectados
+    st.markdown("##### 📋 Archivos detectados")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("**📄 SEP (bruto)**")
+        f_sep = st.session_state.todouno_files['sep']
+        if f_sep:
+            st.success(f"✓ {f_sep.name}")
+        else:
+            st.warning("⬜ No detectado")
+
+    with col2:
+        st.markdown("**📄 PIE/Normal (bruto)**")
+        f_pie = st.session_state.todouno_files['pie']
+        if f_pie:
+            st.success(f"✓ {f_pie.name}")
+        else:
+            st.warning("⬜ No detectado")
+
+    with col3:
+        st.markdown("**📋 MINEDUC (web_sostenedor)**")
+        f_web = st.session_state.todouno_files['web']
+        if f_web:
+            st.success(f"✓ {f_web.name}")
+        else:
+            st.warning("⬜ No detectado")
+
+    # Botón para limpiar
+    if st.button("🔄 Limpiar archivos", key="btn_clear_todouno"):
+        st.session_state.todouno_files = {'sep': None, 'pie': None, 'web': None}
+        st.rerun()
+
+    # Verificar que están todos los archivos
+    if not all([f_sep, f_pie, f_web]):
+        warning_box("Carga los **3 archivos** para continuar")
+        return
+
+    st.markdown("---")
+
+    # Configuración del procesamiento
+    st.markdown("##### ⚙️ Configuración")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Selector de mes
+        mes_default = datetime.now().strftime("%Y-%m")
+        mes = st.text_input(
+            "📅 Mes de procesamiento",
+            value=mes_default,
+            help="Formato: YYYY-MM (ej: 2024-01)"
+        )
+
+    with col2:
+        # Checkbox para comparar
+        meses_disponibles = repo.obtener_meses_disponibles()
+        comparar = st.checkbox(
+            "📊 Comparar con mes anterior",
+            value=False,
+            disabled=len(meses_disponibles) == 0,
+            help="Compara con un procesamiento guardado anteriormente"
+        )
+
+        mes_anterior = None
+        if comparar and meses_disponibles:
+            mes_anterior = st.selectbox(
+                "Selecciona mes anterior",
+                options=meses_disponibles,
+                key="mes_anterior_select"
+            )
+
+    # Opción para guardar en BD
+    guardar_bd = st.checkbox(
+        "💾 Guardar en base de datos (para comparaciones futuras)",
+        value=True
+    )
+
+    st.markdown("---")
+
+    # Botón de procesar
+    if st.button("🚀 PROCESAR TODO", key="btn_todouno", use_container_width=True):
+        processor = IntegradoProcessor()
+
+        progress = st.progress(0)
+        status = st.empty()
+
+        def callback(val, msg):
+            progress.progress(val / 100)
+            status.markdown(f"**⏳ {msg}**")
+
+        try:
+            # Crear archivos temporales
+            paths = {}
+            for key, f in [('sep', f_sep), ('pie', f_pie), ('web', f_web)]:
+                tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+                tmp.write(f.getvalue())
+                paths[key] = Path(tmp.name)
+                tmp.close()
+
+            out_tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+            out_path = Path(out_tmp.name)
+            out_tmp.close()
+
+            # Procesar todo
+            df_result, audit = processor.process_all(
+                sep_bruto_path=paths['sep'],
+                pie_bruto_path=paths['pie'],
+                web_sostenedor_path=paths['web'],
+                output_path=out_path,
+                progress_callback=callback
+            )
+
+            progress.progress(100)
+            status.markdown("**✅ ¡Procesamiento completado!**")
+
+            # Guardar en BD si está marcado
+            if guardar_bd:
+                try:
+                    repo.guardar_procesamiento(mes, df_result)
+                    st.success(f"💾 Datos guardados en base de datos para {mes}")
+                except Exception as e:
+                    st.warning(f"⚠️ No se pudo guardar en BD: {str(e)}")
+
+            # Realizar comparación si está habilitada
+            comparacion = None
+            if comparar and mes_anterior:
+                try:
+                    comparador = ComparadorMeses(repo)
+                    comparacion = comparador.comparar(mes_anterior, mes)
+                except Exception as e:
+                    st.warning(f"⚠️ No se pudo realizar comparación: {str(e)}")
+
+            # Mostrar métricas principales
+            st.markdown("---")
+            st.markdown("##### 📈 Resumen de Distribución")
+
+            brp_sep = df_result['BRP_SEP'].sum() if 'BRP_SEP' in df_result.columns else 0
+            brp_pie = df_result['BRP_PIE'].sum() if 'BRP_PIE' in df_result.columns else 0
+            brp_normal = df_result['BRP_NORMAL'].sum() if 'BRP_NORMAL' in df_result.columns else 0
+            brp_total = brp_sep + brp_pie + brp_normal
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("SEP", f"${brp_sep:,.0f}")
+            c2.metric("PIE", f"${brp_pie:,.0f}")
+            c3.metric("NORMAL", f"${brp_normal:,.0f}")
+            c4.metric("TOTAL", f"${brp_total:,.0f}")
+
+            # Gráficos
+            if brp_total > 0:
+                st.markdown("##### 📊 Distribución Visual")
+
+                col_chart1, col_chart2 = st.columns(2)
+
+                with col_chart1:
+                    import plotly.express as px
+
+                    df_pie_chart = pd.DataFrame({
+                        'Tipo': ['SEP', 'PIE', 'NORMAL'],
+                        'Monto': [brp_sep, brp_pie, brp_normal]
+                    })
+
+                    fig = px.pie(df_pie_chart, values='Monto', names='Tipo',
+                                 title='Distribución por Subvención',
+                                 color_discrete_sequence=['#3b82f6', '#10b981', '#f59e0b'])
+                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                    fig.update_layout(height=300, showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col_chart2:
+                    # Auditoría resumen
+                    audit_summary = audit.get_summary()
+                    st.markdown("**📋 Resumen de Auditoría**")
+                    st.write(f"Total eventos: {audit_summary.get('total', 0)}")
+                    st.write(f"Advertencias: {audit_summary.get('advertencias', 0)}")
+                    st.write(f"Errores: {audit_summary.get('errores', 0)}")
+
+                    # Docentes EIB
+                    docentes_eib = len(audit.get_docentes_eib())
+                    if docentes_eib > 0:
+                        st.warning(f"⚠️ {docentes_eib} docentes con BRP $0 (posibles EIB)")
+
+            # Mostrar comparación si existe
+            if comparacion:
+                st.markdown("---")
+                st.markdown("##### 📊 Comparación con Mes Anterior")
+
+                resumen = comparacion.get('resumen', {})
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    diff_doc = resumen.get('docentes_actual', 0) - resumen.get('docentes_anterior', 0)
+                    st.metric(
+                        "Docentes",
+                        f"{resumen.get('docentes_actual', 0):,}",
+                        delta=f"{diff_doc:+d}"
+                    )
+                with col2:
+                    st.metric(
+                        "Nuevos",
+                        f"{resumen.get('docentes_nuevos', 0):,}"
+                    )
+                with col3:
+                    st.metric(
+                        "Salieron",
+                        f"{resumen.get('docentes_salieron', 0):,}"
+                    )
+
+                # BRP
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(
+                        "BRP Total",
+                        f"${resumen.get('brp_actual', 0):,.0f}",
+                        delta=f"{resumen.get('cambio_brp_pct', 0):+.1f}%"
+                    )
+                with col2:
+                    cambios_monto = resumen.get('cambios_monto_significativo', 0)
+                    if cambios_monto > 0:
+                        st.warning(f"⚠️ {cambios_monto} docentes con cambio de monto >10%")
+
+                # Expandir detalles
+                with st.expander("👀 Ver detalles de comparación"):
+                    # Docentes nuevos
+                    nuevos = comparacion.get('docentes_nuevos', [])
+                    if nuevos:
+                        st.markdown("**Docentes Nuevos:**")
+                        df_nuevos = pd.DataFrame(nuevos)
+                        st.dataframe(df_nuevos, use_container_width=True)
+
+                    # Docentes que salieron
+                    salieron = comparacion.get('docentes_salieron', [])
+                    if salieron:
+                        st.markdown("**Docentes que Salieron:**")
+                        df_salieron = pd.DataFrame(salieron)
+                        st.dataframe(df_salieron, use_container_width=True)
+
+                    # Cambios de monto
+                    cambios = comparacion.get('cambios_montos', [])
+                    if cambios:
+                        st.markdown("**Cambios Significativos de Monto:**")
+                        df_cambios = pd.DataFrame(cambios)
+                        st.dataframe(df_cambios, use_container_width=True)
+
+            # Sección de advertencias del audit
+            warnings = audit.get_warnings()
+            if warnings:
+                with st.expander(f"⚠️ Ver {len(warnings)} advertencias"):
+                    for w in warnings[:20]:
+                        st.warning(f"{w.mensaje}")
+                    if len(warnings) > 20:
+                        st.info(f"... y {len(warnings) - 20} más")
+
+            st.markdown("---")
+            st.markdown("##### 📥 Descargas")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # Descargar Excel
+                with open(out_path, 'rb') as f:
+                    excel_bytes = f.read()
+
+                st.download_button(
+                    "📥 DESCARGAR EXCEL",
+                    data=excel_bytes,
+                    file_name=f"brp_distribuido_{mes}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+            with col2:
+                # Generar y descargar informe Word
+                try:
+                    informe = InformeWord()
+                    word_buffer = informe.generar(
+                        mes=mes,
+                        df_resultado=df_result,
+                        audit_log=audit,
+                        comparacion=comparacion
+                    )
+
+                    st.download_button(
+                        "📄 DESCARGAR INFORME WORD",
+                        data=word_buffer.getvalue(),
+                        file_name=f"informe_brp_{mes}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.error(f"Error generando informe Word: {str(e)}")
+
+            # Vista previa
+            with st.expander("👀 Vista previa del resultado"):
+                st.dataframe(df_result.head(20), use_container_width=True)
+
+        except Exception as e:
+            st.error(f"❌ **Error:** {str(e)}")
+            import traceback
+            with st.expander("Ver detalles del error"):
+                st.code(traceback.format_exc())
+
+
 def tab_ayuda():
     """Pestaña de ayuda."""
-    
+
     st.markdown("### 🚀 Inicio Rápido")
-    
+
     st.markdown("""
     RemuPro te ayuda a procesar remuneraciones educativas de forma simple y rápida.
-    
+
     ---
-    
+
     ### 📋 Flujo de trabajo recomendado
-    
+
+    **Opción 1 - Todo en Uno (Recomendado):**
+    1. Ve a la pestaña **"Todo en Uno"**
+    2. Carga los 3 archivos BRUTOS (SEP, PIE, web_sostenedor)
+    3. El sistema procesa todo automáticamente
+    4. Descarga Excel e Informe Word
+
+    **Opción 2 - Paso a Paso:**
     1. **Procesar SEP** → Pestaña "SEP / PIE", selecciona SEP, sube archivo
-    2. **Procesar PIE** → Misma pestaña, selecciona PIE-NORMAL, sube archivo  
+    2. **Procesar PIE** → Misma pestaña, selecciona PIE-NORMAL, sube archivo
     3. **Distribuir BRP** → Pestaña "Distribución BRP", carga los 3 archivos
-    
+
     ---
-    
+
     ### ❓ Preguntas frecuentes
-    
+
     **¿Qué hojas debe tener mi archivo?**
     - Para SEP/PIE: `HORAS` y `TOTAL`
     - Para Duplicados: `Hoja1` con columna `DUPLICADOS`
-    
+
     **¿De dónde saco web_sostenedor?**
     - Se descarga desde la plataforma del MINEDUC
-    
+
     **¿Qué significa cada columna BRP?**
     - `BRP_SEP`: Monto asignado a Subvención Escolar Preferencial
     - `BRP_PIE`: Monto asignado a Programa de Integración Escolar
-    - `BRP_GENERAL`: Monto asignado a Subvención Normal
-    
+    - `BRP_NORMAL`: Monto asignado a Subvención Normal
+
+    **¿Qué son los docentes EIB?**
+    - Docentes del programa de Educación Intercultural Bilingüe
+    - Aparecen con BRP $0 en el sistema
+
+    **¿Cómo funciona la comparación de meses?**
+    - Guarda el procesamiento en la base de datos
+    - Luego puedes comparar con meses anteriores
+    - Identifica docentes nuevos, salientes y cambios de monto
+
     ---
-    
+
     ### 🎨 Cambiar Tema (Claro/Oscuro)
-    
+
     1. Haz clic en el menú **⋮** (arriba a la derecha)
     2. Selecciona **Settings**
     3. En **Theme**, elige **Light** o **Dark**
-    
+
     ---
-    
+
     ### 🛑 Para cerrar la aplicación
-    
+
     Cierra la ventana de la terminal o presiona `Ctrl + C`
     """)
 
@@ -890,31 +1257,35 @@ def tab_ayuda():
 
 def main():
     show_header()
-    
+
     # Tabs principales
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 SEP / PIE",
         "💰 Distribución BRP",
         "🔄 Duplicados",
+        "🎯 Todo en Uno",
         "❓ Ayuda"
     ])
-    
+
     with tab1:
         tab_sep_pie()
-    
+
     with tab2:
         tab_brp()
-    
+
     with tab3:
         tab_duplicados()
-    
+
     with tab4:
+        tab_todo_en_uno()
+
+    with tab5:
         tab_ayuda()
-    
+
     # Footer
     st.markdown(f"""
     <div class="app-footer">
-        RemuPro v{VERSION} • © 2024 Eric Aguayo Quintriqueo
+        RemuPro v{VERSION} • © 2026 Eric Aguayo Quintriqueo
     </div>
     """, unsafe_allow_html=True)
 

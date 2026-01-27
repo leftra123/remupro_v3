@@ -1,6 +1,11 @@
-# RemuPro v2.1 - Dependencias
+# RemuPro v2.3 - Dependencias
 pandas>=2.0.0
 numpy>=1.24.0
 openpyxl>=3.1.0
 streamlit>=1.28.0
 plotly>=5.18.0
+
+# Nuevas dependencias para "Todo en Uno"
+python-docx>=0.8.11    # Generación de informes Word
+sqlalchemy>=2.0.0      # ORM para SQLite (almacenamiento histórico)
+matplotlib>=3.7.0      # Gráficos para informe Word
