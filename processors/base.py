@@ -14,10 +14,11 @@ import pandas as pd
 import numpy as np
 
 from config.columns import (
-    ColumnConfig, 
-    SALARY_BENEFIT_COLUMNS, 
+    ColumnConfig,
+    SALARY_BENEFIT_COLUMNS,
     SPECIAL_SALARY_COLUMNS,
-    get_available_columns
+    get_available_columns,
+    clean_columns,
 )
 
 
@@ -104,12 +105,13 @@ class BaseProcessor(ABC):
         """
         for attempt in range(max_retries):
             try:
-                return pd.read_excel(
-                    str(file_path), 
+                df = pd.read_excel(
+                    str(file_path),
                     sheet_name=sheet_name,
                     engine='openpyxl',
                     **read_kwargs
                 )
+                return clean_columns(df)
             except PermissionError:
                 if attempt == max_retries - 1:
                     self._raise_permission_error(file_path, "lectura")
@@ -267,9 +269,11 @@ class BaseProcessor(ABC):
             )
             for _, row in problematicos.iterrows():
                 nombre = row.get(name_column, 'N/A')
-                rut = row.get(rut_column, 'N/A')
+                rut = str(row.get(rut_column, 'N/A'))
+                # Mask RUT in logs to protect PII - show only last 4 chars
+                masked_rut = f"***{rut[-4:]}" if len(rut) > 4 else "***"
                 horas = row.get(hours_column, 0)
-                self.logger.warning(f"  - {nombre} (RUT: {rut}): {horas} horas")
+                self.logger.warning(f"  - {nombre} (RUT: {masked_rut}): {horas} horas")
         
         return df
     

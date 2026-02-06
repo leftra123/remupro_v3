@@ -15,7 +15,10 @@ import pandas as pd
 import numpy as np
 
 from processors.base import BaseProcessor, ProgressCallback, ProcessorError
-from config.columns import WEB_SOSTENEDOR_COLUMNS, normalize_rut
+from config.columns import (
+    WEB_SOSTENEDOR_COLUMNS, WEB_CRITICAL_COLUMNS,
+    WEB_INFO_COLUMNS, WEB_FRIENDLY_NAMES, normalize_rut
+)
 
 
 class BRPProcessor(BaseProcessor):
@@ -28,6 +31,7 @@ class BRPProcessor(BaseProcessor):
         self.cols = WEB_SOSTENEDOR_COLUMNS
         self.cols_actual = {}
         self.docentes_revisar = []
+        self.column_alerts = []
     
     def process_file(
         self, 
@@ -54,6 +58,7 @@ class BRPProcessor(BaseProcessor):
             # 2. Construir mapa de horas
             progress_callback(35, "Analizando horas por tipo de subvención...")
             horas_por_docente = self._build_hours_map(df_sep, df_pie)
+            self._horas_map = horas_por_docente  # Guardar para acceso posterior
             
             # 3. Identificar casos para revisión
             progress_callback(40, "Identificando casos para revisión...")
@@ -126,7 +131,13 @@ class BRPProcessor(BaseProcessor):
             # Hoja 4: Resumen General
             df_general = self._create_general_summary(df_result)
             df_general.to_excel(writer, sheet_name='RESUMEN_GENERAL', index=False)
-        
+
+            # Hoja 5: Multi-Establecimiento (docentes en 2+ escuelas)
+            df_multi = self._create_multi_establishment_sheet(df_result)
+            if df_multi is not None and not df_multi.empty:
+                df_multi.to_excel(writer, sheet_name='MULTI_ESTABLECIMIENTO', index=False)
+                self.logger.info(f"📋 Hoja MULTI_ESTABLECIMIENTO: {df_multi['RUT'].nunique()} docentes")
+
         self.logger.info(f"✅ Archivo guardado: {output_path.name}")
     
     def _prepare_export_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -163,112 +174,186 @@ class BRPProcessor(BaseProcessor):
         if col_horas and col_horas in df.columns:
             cols_inicio.append(col_horas)
         
+        # Columnas MINEDUC originales (visibles al usuario)
+        cols_mineduc = [
+            'RECONOCIMIENTO_DIST', 'TRAMO_DIST', 'ASIG_PRIOR_DIST',
+            'SUBV_RECON_DIST', 'TRANSF_RECON_DIST',
+            'SUBV_TRAMO_DIST', 'TRANSF_TRAMO_DIST',
+        ]
+        cols_mineduc = [c for c in cols_mineduc if c in df.columns]
+
+        # Renombrar columnas MINEDUC para claridad en el export
+        rename_map = {
+            'RECONOCIMIENTO_DIST': 'MINEDUC_RECONOCIMIENTO',
+            'TRAMO_DIST': 'MINEDUC_TRAMO',
+            'ASIG_PRIOR_DIST': 'MINEDUC_PRIORITARIOS',
+            'SUBV_RECON_DIST': 'MINEDUC_SUBV_RECONOCIMIENTO',
+            'TRANSF_RECON_DIST': 'MINEDUC_TRANSF_RECONOCIMIENTO',
+            'SUBV_TRAMO_DIST': 'MINEDUC_SUBV_TRAMO',
+            'TRANSF_TRAMO_DIST': 'MINEDUC_TRANSF_TRAMO',
+        }
+        for old_name in cols_mineduc:
+            new_name = rename_map.get(old_name, old_name)
+            if old_name in df.columns:
+                df[new_name] = df[old_name]
+        cols_mineduc_renamed = [rename_map.get(c, c) for c in cols_mineduc]
+
+        # Columnas multi-establecimiento
+        cols_multi = []
+        if 'ES_MULTI' in df.columns:
+            df['MULTI_ESTABLECIMIENTO'] = df['ES_MULTI'].map({True: 'SI', False: 'NO'})
+            cols_multi = ['MULTI_ESTABLECIMIENTO', 'NUM_ESTABLECIMIENTOS']
+            cols_multi = [c for c in cols_multi if c in df.columns]
+
         # Columnas BRP
         cols_brp = [
             'BRP_SEP', 'BRP_PIE', 'BRP_NORMAL', 'BRP_TOTAL',
+            'TOTAL_DAEM_SEP', 'TOTAL_DAEM_PIE', 'TOTAL_DAEM_NORMAL',
+            'TOTAL_CPEIP_SEP', 'TOTAL_CPEIP_PIE', 'TOTAL_CPEIP_NORMAL',
             'BRP_RECONOCIMIENTO_SEP', 'BRP_RECONOCIMIENTO_PIE', 'BRP_RECONOCIMIENTO_NORMAL',
-            'BRP_TRAMO_SEP', 'BRP_TRAMO_PIE', 'BRP_TRAMO_NORMAL'
+            'BRP_TRAMO_SEP', 'BRP_TRAMO_PIE', 'BRP_TRAMO_NORMAL',
+            'DAEM_RECON_SEP', 'DAEM_RECON_PIE', 'DAEM_RECON_NORMAL',
+            'CPEIP_RECON_SEP', 'CPEIP_RECON_PIE', 'CPEIP_RECON_NORMAL',
+            'DAEM_TRAMO_SEP', 'DAEM_TRAMO_PIE', 'DAEM_TRAMO_NORMAL',
+            'CPEIP_TRAMO_SEP', 'CPEIP_TRAMO_PIE', 'CPEIP_TRAMO_NORMAL',
+            'CPEIP_PRIOR_SEP', 'CPEIP_PRIOR_PIE', 'CPEIP_PRIOR_NORMAL',
         ]
         cols_brp = [c for c in cols_brp if c in df.columns]
-        
+
         # Columnas finales (excluyendo las ya agregadas y las internas)
-        cols_excluir = set(cols_inicio + cols_brp + ['RUT_NORM', 'PROP_HORAS', 'ES_MULTI', 
-                                                      'NUM_ESTABLECIMIENTOS', 'TOTAL_HORAS_MINEDUC',
-                                                      'RECONOCIMIENTO_DIST', 'TRAMO_DIST'])
+        cols_excluir = set(cols_inicio + cols_mineduc_renamed + cols_multi + cols_brp + [
+            'RUT_NORM', 'ES_MULTI', 'TOTAL_HORAS_MINEDUC',
+            'RECONOCIMIENTO_DIST', 'TRAMO_DIST',
+            'SUBV_RECON_DIST', 'TRANSF_RECON_DIST',
+            'SUBV_TRAMO_DIST', 'TRANSF_TRAMO_DIST',
+            'ASIG_PRIOR_DIST', 'MULTI_ESTABLECIMIENTO',
+            'NUM_ESTABLECIMIENTOS',
+        ])
         cols_resto = [c for c in df.columns if c not in cols_excluir]
-        
-        # Ordenar columnas
-        cols_final = cols_inicio + cols_brp + cols_resto
+
+        # Ordenar: ID + MINEDUC originales + Multi + BRP distribuido + resto
+        cols_final = cols_inicio + cols_mineduc_renamed + cols_multi + cols_brp + cols_resto
         cols_final = [c for c in cols_final if c in df.columns]
-        
+
         return df[cols_final]
     
     def _create_summary_by_rbd(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Crea resumen de BRP por establecimiento."""
+        """Crea resumen de BRP por establecimiento con desglose DAEM/CPEIP."""
         col_rbd = self.cols_actual.get('rbd')
-        
+
         if not col_rbd or col_rbd not in df.columns:
             return pd.DataFrame({'Mensaje': ['No se encontró columna RBD']})
-        
+
         # Agrupar por RBD
-        resumen = df.groupby(col_rbd).agg({
+        agg_cols = {
             'RUT_NORM': 'nunique',
-            'BRP_SEP': 'sum',
-            'BRP_PIE': 'sum',
-            'BRP_NORMAL': 'sum',
-            'BRP_TOTAL': 'sum'
-        }).reset_index()
-        
-        resumen.columns = ['RBD', 'DOCENTES', 'BRP_SEP', 'BRP_PIE', 'BRP_NORMAL', 'BRP_TOTAL']
-        
+            'BRP_SEP': 'sum', 'BRP_PIE': 'sum', 'BRP_NORMAL': 'sum', 'BRP_TOTAL': 'sum',
+            'TOTAL_DAEM_SEP': 'sum', 'TOTAL_DAEM_PIE': 'sum', 'TOTAL_DAEM_NORMAL': 'sum',
+            'TOTAL_CPEIP_SEP': 'sum', 'TOTAL_CPEIP_PIE': 'sum', 'TOTAL_CPEIP_NORMAL': 'sum',
+        }
+        resumen = df.groupby(col_rbd).agg(agg_cols).reset_index()
+
+        resumen.columns = ['RBD', 'DOCENTES',
+                           'BRP_SEP', 'BRP_PIE', 'BRP_NORMAL', 'BRP_TOTAL',
+                           'DAEM_SEP', 'DAEM_PIE', 'DAEM_NORMAL',
+                           'CPEIP_SEP', 'CPEIP_PIE', 'CPEIP_NORMAL']
+
         # Agregar fila de totales
-        totales = pd.DataFrame([{
-            'RBD': 'TOTAL',
-            'DOCENTES': resumen['DOCENTES'].sum(),
-            'BRP_SEP': resumen['BRP_SEP'].sum(),
-            'BRP_PIE': resumen['BRP_PIE'].sum(),
-            'BRP_NORMAL': resumen['BRP_NORMAL'].sum(),
-            'BRP_TOTAL': resumen['BRP_TOTAL'].sum()
-        }])
-        
-        resumen = pd.concat([resumen, totales], ignore_index=True)
-        
+        totales = {col: resumen[col].sum() for col in resumen.columns if col != 'RBD'}
+        totales['RBD'] = 'TOTAL'
+        resumen = pd.concat([resumen, pd.DataFrame([totales])], ignore_index=True)
+
         # Calcular porcentajes
         total_brp = resumen.loc[resumen['RBD'] == 'TOTAL', 'BRP_TOTAL'].values[0]
         if total_brp > 0:
             resumen['%_SEP'] = (resumen['BRP_SEP'] / total_brp * 100).round(1)
             resumen['%_PIE'] = (resumen['BRP_PIE'] / total_brp * 100).round(1)
             resumen['%_NORMAL'] = (resumen['BRP_NORMAL'] / total_brp * 100).round(1)
-        
+
         return resumen
     
     def _create_general_summary(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Crea resumen general para dashboard."""
+        """Crea resumen general para dashboard con desglose DAEM/CPEIP."""
         total_docentes = df['RUT_NORM'].nunique()
         col_rbd = self.cols_actual.get('rbd')
         total_rbds = df[col_rbd].nunique() if col_rbd and col_rbd in df.columns else 0
-        
+
         brp_sep = df['BRP_SEP'].sum()
         brp_pie = df['BRP_PIE'].sum()
         brp_normal = df['BRP_NORMAL'].sum()
         brp_total = brp_sep + brp_pie + brp_normal
-        
+
         recon_sep = df['BRP_RECONOCIMIENTO_SEP'].sum()
         recon_pie = df['BRP_RECONOCIMIENTO_PIE'].sum()
         recon_normal = df['BRP_RECONOCIMIENTO_NORMAL'].sum()
-        
+
         tramo_sep = df['BRP_TRAMO_SEP'].sum()
         tramo_pie = df['BRP_TRAMO_PIE'].sum()
         tramo_normal = df['BRP_TRAMO_NORMAL'].sum()
-        
+
+        daem_sep = df['TOTAL_DAEM_SEP'].sum()
+        daem_pie = df['TOTAL_DAEM_PIE'].sum()
+        daem_normal = df['TOTAL_DAEM_NORMAL'].sum()
+        daem_total = daem_sep + daem_pie + daem_normal
+
+        cpeip_sep = df['TOTAL_CPEIP_SEP'].sum()
+        cpeip_pie = df['TOTAL_CPEIP_PIE'].sum()
+        cpeip_normal = df['TOTAL_CPEIP_NORMAL'].sum()
+        cpeip_total = cpeip_sep + cpeip_pie + cpeip_normal
+
+        prior_sep = df['CPEIP_PRIOR_SEP'].sum()
+        prior_pie = df['CPEIP_PRIOR_PIE'].sum()
+        prior_normal = df['CPEIP_PRIOR_NORMAL'].sum()
+
+        pct_sep = round(100 * brp_sep / brp_total, 1) if brp_total > 0 else 0
+        pct_pie = round(100 * brp_pie / brp_total, 1) if brp_total > 0 else 0
+        pct_normal = round(100 * brp_normal / brp_total, 1) if brp_total > 0 else 0
+
         resumen = [
-            {'CONCEPTO': 'ESTADÍSTICAS GENERALES', 'VALOR': ''},
+            {'CONCEPTO': 'ESTADÍSTICAS GENERALES', 'VALOR': None},
             {'CONCEPTO': 'Total Docentes', 'VALOR': total_docentes},
             {'CONCEPTO': 'Total Establecimientos', 'VALOR': total_rbds},
             {'CONCEPTO': 'Casos a Revisar', 'VALOR': len(self.docentes_revisar)},
-            {'CONCEPTO': '', 'VALOR': ''},
-            {'CONCEPTO': 'DISTRIBUCIÓN BRP', 'VALOR': ''},
-            {'CONCEPTO': 'BRP SEP', 'VALOR': f"${brp_sep:,.0f}"},
-            {'CONCEPTO': 'BRP PIE', 'VALOR': f"${brp_pie:,.0f}"},
-            {'CONCEPTO': 'BRP NORMAL', 'VALOR': f"${brp_normal:,.0f}"},
-            {'CONCEPTO': 'BRP TOTAL', 'VALOR': f"${brp_total:,.0f}"},
-            {'CONCEPTO': '', 'VALOR': ''},
-            {'CONCEPTO': 'PORCENTAJES', 'VALOR': ''},
-            {'CONCEPTO': '% SEP', 'VALOR': f"{100*brp_sep/brp_total:.1f}%" if brp_total > 0 else "0%"},
-            {'CONCEPTO': '% PIE', 'VALOR': f"{100*brp_pie/brp_total:.1f}%" if brp_total > 0 else "0%"},
-            {'CONCEPTO': '% NORMAL', 'VALOR': f"{100*brp_normal/brp_total:.1f}%" if brp_total > 0 else "0%"},
-            {'CONCEPTO': '', 'VALOR': ''},
-            {'CONCEPTO': 'DETALLE RECONOCIMIENTO', 'VALOR': ''},
-            {'CONCEPTO': 'Reconocimiento SEP', 'VALOR': f"${recon_sep:,.0f}"},
-            {'CONCEPTO': 'Reconocimiento PIE', 'VALOR': f"${recon_pie:,.0f}"},
-            {'CONCEPTO': 'Reconocimiento NORMAL', 'VALOR': f"${recon_normal:,.0f}"},
-            {'CONCEPTO': '', 'VALOR': ''},
-            {'CONCEPTO': 'DETALLE TRAMO', 'VALOR': ''},
-            {'CONCEPTO': 'Tramo SEP', 'VALOR': f"${tramo_sep:,.0f}"},
-            {'CONCEPTO': 'Tramo PIE', 'VALOR': f"${tramo_pie:,.0f}"},
-            {'CONCEPTO': 'Tramo NORMAL', 'VALOR': f"${tramo_normal:,.0f}"},
+            {'CONCEPTO': '', 'VALOR': None},
+            {'CONCEPTO': 'DISTRIBUCIÓN BRP TOTAL', 'VALOR': None},
+            {'CONCEPTO': 'BRP SEP', 'VALOR': int(brp_sep)},
+            {'CONCEPTO': 'BRP PIE', 'VALOR': int(brp_pie)},
+            {'CONCEPTO': 'BRP NORMAL', 'VALOR': int(brp_normal)},
+            {'CONCEPTO': 'BRP TOTAL', 'VALOR': int(brp_total)},
+            {'CONCEPTO': '', 'VALOR': None},
+            {'CONCEPTO': 'PORCENTAJES', 'VALOR': None},
+            {'CONCEPTO': '% SEP', 'VALOR': pct_sep},
+            {'CONCEPTO': '% PIE', 'VALOR': pct_pie},
+            {'CONCEPTO': '% NORMAL', 'VALOR': pct_normal},
+            {'CONCEPTO': '', 'VALOR': None},
+            {'CONCEPTO': 'DAEM (Subvención)', 'VALOR': None},
+            {'CONCEPTO': 'DAEM SEP', 'VALOR': int(daem_sep)},
+            {'CONCEPTO': 'DAEM PIE', 'VALOR': int(daem_pie)},
+            {'CONCEPTO': 'DAEM NORMAL', 'VALOR': int(daem_normal)},
+            {'CONCEPTO': 'DAEM TOTAL', 'VALOR': int(daem_total)},
+            {'CONCEPTO': '', 'VALOR': None},
+            {'CONCEPTO': 'CPEIP (Transferencia)', 'VALOR': None},
+            {'CONCEPTO': 'CPEIP SEP', 'VALOR': int(cpeip_sep)},
+            {'CONCEPTO': 'CPEIP PIE', 'VALOR': int(cpeip_pie)},
+            {'CONCEPTO': 'CPEIP NORMAL', 'VALOR': int(cpeip_normal)},
+            {'CONCEPTO': 'CPEIP TOTAL', 'VALOR': int(cpeip_total)},
+            {'CONCEPTO': '', 'VALOR': None},
+            {'CONCEPTO': 'DETALLE RECONOCIMIENTO', 'VALOR': None},
+            {'CONCEPTO': 'Reconocimiento SEP', 'VALOR': int(recon_sep)},
+            {'CONCEPTO': 'Reconocimiento PIE', 'VALOR': int(recon_pie)},
+            {'CONCEPTO': 'Reconocimiento NORMAL', 'VALOR': int(recon_normal)},
+            {'CONCEPTO': '', 'VALOR': None},
+            {'CONCEPTO': 'DETALLE TRAMO', 'VALOR': None},
+            {'CONCEPTO': 'Tramo SEP', 'VALOR': int(tramo_sep)},
+            {'CONCEPTO': 'Tramo PIE', 'VALOR': int(tramo_pie)},
+            {'CONCEPTO': 'Tramo NORMAL', 'VALOR': int(tramo_normal)},
+            {'CONCEPTO': '', 'VALOR': None},
+            {'CONCEPTO': 'DETALLE ALUMNOS PRIORITARIOS (CPEIP)', 'VALOR': None},
+            {'CONCEPTO': 'Prioritarios SEP', 'VALOR': int(prior_sep)},
+            {'CONCEPTO': 'Prioritarios PIE', 'VALOR': int(prior_pie)},
+            {'CONCEPTO': 'Prioritarios NORMAL', 'VALOR': int(prior_normal)},
         ]
-        
+
         return pd.DataFrame(resumen)
     
     def _load_web_sostenedor(self, path: Path) -> pd.DataFrame:
@@ -313,6 +398,7 @@ class BRPProcessor(BaseProcessor):
             'transf_reconocimiento': find_col('total transferencia directa reconocimiento'),
             'subv_tramo': find_col('subvención tramo'),
             'transf_tramo': find_col('transferencia directa tramo'),
+            'asig_prioritarios': find_col('asignación directa alumnos prioritarios') or find_col('alumnos prioritarios'),
         }
         
         # Verificar mínimas requeridas
@@ -320,12 +406,66 @@ class BRPProcessor(BaseProcessor):
         missing = [r for r in required if not self.cols_actual.get(r)]
         if missing:
             raise ProcessorError(f"No se encontraron columnas: {missing}")
-        
+
+        # Generar alertas de columnas
+        self.column_alerts = []
+
+        # Columnas críticas faltantes (afectan cálculo)
+        for key in WEB_CRITICAL_COLUMNS:
+            if not self.cols_actual.get(key):
+                nombre_amigable = WEB_FRIENDLY_NAMES.get(key, key)
+                self.column_alerts.append({
+                    'nivel': 'error',
+                    'tipo': 'columna_critica',
+                    'columna_key': key,
+                    'columna_nombre': nombre_amigable,
+                    'mensaje': f"No se encontró '{nombre_amigable}'. Los montos de este concepto serán $0."
+                })
+                self.logger.warning(f"Columna crítica no encontrada: {nombre_amigable}")
+
+        # Columnas informativas faltantes
+        for key in WEB_INFO_COLUMNS:
+            if not self.cols_actual.get(key):
+                nombre_amigable = WEB_FRIENDLY_NAMES.get(key, key)
+                self.column_alerts.append({
+                    'nivel': 'warning',
+                    'tipo': 'columna_info',
+                    'columna_key': key,
+                    'columna_nombre': nombre_amigable,
+                    'mensaje': f"No se encontró '{nombre_amigable}' (informativa, no afecta cálculo)."
+                })
+
+        # Columnas nuevas no reconocidas
+        columnas_conocidas = set()
+        for v in WEB_SOSTENEDOR_COLUMNS.values():
+            columnas_conocidas.add(v.lower().strip())
+        for v in self.cols_actual.values():
+            if v:
+                columnas_conocidas.add(v.lower().strip())
+
+        columnas_archivo = {col.lower().strip() for col in df.columns}
+        desconocidas = columnas_archivo - columnas_conocidas - {'rut_norm'}
+
+        if desconocidas:
+            nombres_originales = [col for col in df.columns if col.lower().strip() in desconocidas]
+            self.column_alerts.append({
+                'nivel': 'info',
+                'tipo': 'columna_nueva',
+                'columna_key': None,
+                'columna_nombre': None,
+                'columnas_lista': nombres_originales,
+                'mensaje': f"Se encontraron {len(nombres_originales)} columnas nuevas: {', '.join(nombres_originales)}"
+            })
+
         # Normalizar RUT
         df['RUT_NORM'] = df[self.cols_actual['rut']].apply(normalize_rut)
-        
+
         self.logger.info(f"Columnas mapeadas correctamente")
         return df
+
+    def get_column_alerts(self):
+        """Retorna las alertas de columnas generadas durante la carga."""
+        return self.column_alerts
     
     def _load_processed_file(self, path: Path, tipo: str) -> pd.DataFrame:
         """Carga archivo procesado (SEP o PIE)."""
@@ -550,99 +690,276 @@ class BRPProcessor(BaseProcessor):
         return df
     
     def _distribute_by_establishment(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Distribuye montos proporcionalmente por establecimiento."""
-        col_horas = self.cols_actual['horas_contrato']
-        
-        # Proporción de horas
-        df['PROP_HORAS'] = df[col_horas] / df['TOTAL_HORAS_MINEDUC']
-        df['PROP_HORAS'] = df['PROP_HORAS'].replace([np.inf, -np.inf, np.nan], 0)
-        
-        # Distribuir montos por establecimiento
+        """Copia montos por establecimiento (MINEDUC ya los trae separados por fila/RBD)."""
+        # Los montos en el archivo MINEDUC ya vienen correctamente asignados
+        # por establecimiento (cada fila = un docente en un RBD).
+        # NO se debe multiplicar por proporción de horas, eso causaría doble prorrateo.
+
         col_total_recon = self.cols_actual.get('total_reconocimiento')
         col_total_tramo = self.cols_actual.get('total_tramo')
-        
+
         if col_total_recon and col_total_recon in df.columns:
-            df['RECONOCIMIENTO_DIST'] = (df[col_total_recon] * df['PROP_HORAS']).round(0)
+            df['RECONOCIMIENTO_DIST'] = df[col_total_recon].fillna(0).round(0)
         else:
             df['RECONOCIMIENTO_DIST'] = 0
-        
+
         if col_total_tramo and col_total_tramo in df.columns:
-            df['TRAMO_DIST'] = (df[col_total_tramo] * df['PROP_HORAS']).round(0)
+            df['TRAMO_DIST'] = df[col_total_tramo].fillna(0).round(0)
         else:
             df['TRAMO_DIST'] = 0
-        
+
+        # Sub-componentes DAEM/CPEIP
+        for dist_col, src_key in [
+            ('SUBV_RECON_DIST', 'subv_reconocimiento'),
+            ('TRANSF_RECON_DIST', 'transf_reconocimiento'),
+            ('SUBV_TRAMO_DIST', 'subv_tramo'),
+            ('TRANSF_TRAMO_DIST', 'transf_tramo'),
+            ('ASIG_PRIOR_DIST', 'asig_prioritarios'),
+        ]:
+            col = self.cols_actual.get(src_key)
+            if col and col in df.columns:
+                df[dist_col] = df[col].fillna(0).round(0)
+            else:
+                df[dist_col] = 0
+
         return df
     
     def _classify_by_subvencion(self, df: pd.DataFrame, horas_map: Dict) -> pd.DataFrame:
-        """Clasifica BRP por tipo de subvención (SEP/PIE/NORMAL)."""
-        
-        # Inicializar columnas - usar NORMAL en vez de GENERAL
-        df['BRP_RECONOCIMIENTO_SEP'] = 0.0
-        df['BRP_RECONOCIMIENTO_PIE'] = 0.0
-        df['BRP_RECONOCIMIENTO_NORMAL'] = 0.0
-        df['BRP_TRAMO_SEP'] = 0.0
-        df['BRP_TRAMO_PIE'] = 0.0
-        df['BRP_TRAMO_NORMAL'] = 0.0
-        
+        """Clasifica BRP por tipo de subvención (SEP/PIE/NORMAL) y pagador (DAEM/CPEIP)."""
+
+        # Columnas BRP totales
+        brp_cols = [
+            'BRP_RECONOCIMIENTO_SEP', 'BRP_RECONOCIMIENTO_PIE', 'BRP_RECONOCIMIENTO_NORMAL',
+            'BRP_TRAMO_SEP', 'BRP_TRAMO_PIE', 'BRP_TRAMO_NORMAL',
+        ]
+
+        # Columnas desglose DAEM/CPEIP
+        daem_cpeip_cols = [
+            'DAEM_RECON_SEP', 'DAEM_RECON_PIE', 'DAEM_RECON_NORMAL',
+            'CPEIP_RECON_SEP', 'CPEIP_RECON_PIE', 'CPEIP_RECON_NORMAL',
+            'DAEM_TRAMO_SEP', 'DAEM_TRAMO_PIE', 'DAEM_TRAMO_NORMAL',
+            'CPEIP_TRAMO_SEP', 'CPEIP_TRAMO_PIE', 'CPEIP_TRAMO_NORMAL',
+            'CPEIP_PRIOR_SEP', 'CPEIP_PRIOR_PIE', 'CPEIP_PRIOR_NORMAL',
+        ]
+
+        for col in brp_cols + daem_cpeip_cols:
+            df[col] = 0.0
+
         for idx, row in df.iterrows():
             rut = row.get('RUT_NORM', '')
             recon_dist = row.get('RECONOCIMIENTO_DIST', 0) or 0
             tramo_dist = row.get('TRAMO_DIST', 0) or 0
-            
+            subv_recon = row.get('SUBV_RECON_DIST', 0) or 0
+            transf_recon = row.get('TRANSF_RECON_DIST', 0) or 0
+            subv_tramo = row.get('SUBV_TRAMO_DIST', 0) or 0
+            transf_tramo = row.get('TRANSF_TRAMO_DIST', 0) or 0
+            asig_prior = row.get('ASIG_PRIOR_DIST', 0) or 0
+
             if not rut:
                 continue
-            
+
             # Obtener proporción de horas
             horas = horas_map.get(rut, {'SEP': 0, 'PIE': 0, 'SN': 0, 'TOTAL': 0})
             total_horas = horas['TOTAL']
-            
+
             if total_horas == 0:
                 # Sin info de horas, todo va a NORMAL
                 df.at[idx, 'BRP_RECONOCIMIENTO_NORMAL'] = recon_dist
                 df.at[idx, 'BRP_TRAMO_NORMAL'] = tramo_dist
+                df.at[idx, 'DAEM_RECON_NORMAL'] = subv_recon
+                df.at[idx, 'CPEIP_RECON_NORMAL'] = transf_recon
+                df.at[idx, 'DAEM_TRAMO_NORMAL'] = subv_tramo
+                df.at[idx, 'CPEIP_TRAMO_NORMAL'] = transf_tramo
+                df.at[idx, 'CPEIP_PRIOR_NORMAL'] = asig_prior
                 continue
-            
+
             # Calcular proporciones
             prop_sep = horas['SEP'] / total_horas
             prop_pie = horas['PIE'] / total_horas
-            prop_sn = horas['SN'] / total_horas  # SN = Subvención Normal
-            
-            # Distribuir Reconocimiento
-            df.at[idx, 'BRP_RECONOCIMIENTO_SEP'] = round(recon_dist * prop_sep)
-            df.at[idx, 'BRP_RECONOCIMIENTO_PIE'] = round(recon_dist * prop_pie)
-            df.at[idx, 'BRP_RECONOCIMIENTO_NORMAL'] = round(recon_dist * prop_sn)
-            
-            # Distribuir Tramo
-            df.at[idx, 'BRP_TRAMO_SEP'] = round(tramo_dist * prop_sep)
-            df.at[idx, 'BRP_TRAMO_PIE'] = round(tramo_dist * prop_pie)
-            df.at[idx, 'BRP_TRAMO_NORMAL'] = round(tramo_dist * prop_sn)
-        
-        # Totales por tipo
-        df['BRP_SEP'] = df['BRP_RECONOCIMIENTO_SEP'] + df['BRP_TRAMO_SEP']
-        df['BRP_PIE'] = df['BRP_RECONOCIMIENTO_PIE'] + df['BRP_TRAMO_PIE']
-        df['BRP_NORMAL'] = df['BRP_RECONOCIMIENTO_NORMAL'] + df['BRP_TRAMO_NORMAL']
+
+            # Distribuir con resto exacto: SEP y PIE se redondean,
+            # NORMAL = total - SEP - PIE (garantiza suma exacta)
+            def split3(total_val):
+                v_sep = round(total_val * prop_sep)
+                v_pie = round(total_val * prop_pie)
+                v_sn = total_val - v_sep - v_pie
+                return v_sep, v_pie, v_sn
+
+            # Reconocimiento total
+            s, p, n = split3(recon_dist)
+            df.at[idx, 'BRP_RECONOCIMIENTO_SEP'] = s
+            df.at[idx, 'BRP_RECONOCIMIENTO_PIE'] = p
+            df.at[idx, 'BRP_RECONOCIMIENTO_NORMAL'] = n
+
+            # Tramo total
+            s, p, n = split3(tramo_dist)
+            df.at[idx, 'BRP_TRAMO_SEP'] = s
+            df.at[idx, 'BRP_TRAMO_PIE'] = p
+            df.at[idx, 'BRP_TRAMO_NORMAL'] = n
+
+            # DAEM Reconocimiento (subvención)
+            s, p, n = split3(subv_recon)
+            df.at[idx, 'DAEM_RECON_SEP'] = s
+            df.at[idx, 'DAEM_RECON_PIE'] = p
+            df.at[idx, 'DAEM_RECON_NORMAL'] = n
+
+            # CPEIP Reconocimiento (transferencia)
+            s, p, n = split3(transf_recon)
+            df.at[idx, 'CPEIP_RECON_SEP'] = s
+            df.at[idx, 'CPEIP_RECON_PIE'] = p
+            df.at[idx, 'CPEIP_RECON_NORMAL'] = n
+
+            # DAEM Tramo (subvención)
+            s, p, n = split3(subv_tramo)
+            df.at[idx, 'DAEM_TRAMO_SEP'] = s
+            df.at[idx, 'DAEM_TRAMO_PIE'] = p
+            df.at[idx, 'DAEM_TRAMO_NORMAL'] = n
+
+            # CPEIP Tramo (transferencia)
+            s, p, n = split3(transf_tramo)
+            df.at[idx, 'CPEIP_TRAMO_SEP'] = s
+            df.at[idx, 'CPEIP_TRAMO_PIE'] = p
+            df.at[idx, 'CPEIP_TRAMO_NORMAL'] = n
+
+            # CPEIP Alumnos Prioritarios
+            s, p, n = split3(asig_prior)
+            df.at[idx, 'CPEIP_PRIOR_SEP'] = s
+            df.at[idx, 'CPEIP_PRIOR_PIE'] = p
+            df.at[idx, 'CPEIP_PRIOR_NORMAL'] = n
+
+        # Totales DAEM por subvención
+        df['TOTAL_DAEM_SEP'] = df['DAEM_RECON_SEP'] + df['DAEM_TRAMO_SEP']
+        df['TOTAL_DAEM_PIE'] = df['DAEM_RECON_PIE'] + df['DAEM_TRAMO_PIE']
+        df['TOTAL_DAEM_NORMAL'] = df['DAEM_RECON_NORMAL'] + df['DAEM_TRAMO_NORMAL']
+
+        # Totales CPEIP por subvención
+        df['TOTAL_CPEIP_SEP'] = df['CPEIP_RECON_SEP'] + df['CPEIP_TRAMO_SEP'] + df['CPEIP_PRIOR_SEP']
+        df['TOTAL_CPEIP_PIE'] = df['CPEIP_RECON_PIE'] + df['CPEIP_TRAMO_PIE'] + df['CPEIP_PRIOR_PIE']
+        df['TOTAL_CPEIP_NORMAL'] = df['CPEIP_RECON_NORMAL'] + df['CPEIP_TRAMO_NORMAL'] + df['CPEIP_PRIOR_NORMAL']
+
+        # Totales BRP por tipo (DAEM + CPEIP)
+        df['BRP_SEP'] = df['TOTAL_DAEM_SEP'] + df['TOTAL_CPEIP_SEP']
+        df['BRP_PIE'] = df['TOTAL_DAEM_PIE'] + df['TOTAL_CPEIP_PIE']
+        df['BRP_NORMAL'] = df['TOTAL_DAEM_NORMAL'] + df['TOTAL_CPEIP_NORMAL']
         df['BRP_TOTAL'] = df['BRP_SEP'] + df['BRP_PIE'] + df['BRP_NORMAL']
-        
+
         # Convertir a enteros
-        for col in ['BRP_RECONOCIMIENTO_SEP', 'BRP_RECONOCIMIENTO_PIE', 'BRP_RECONOCIMIENTO_NORMAL',
-                    'BRP_TRAMO_SEP', 'BRP_TRAMO_PIE', 'BRP_TRAMO_NORMAL',
-                    'BRP_SEP', 'BRP_PIE', 'BRP_NORMAL', 'BRP_TOTAL']:
+        int_cols = brp_cols + daem_cpeip_cols + [
+            'TOTAL_DAEM_SEP', 'TOTAL_DAEM_PIE', 'TOTAL_DAEM_NORMAL',
+            'TOTAL_CPEIP_SEP', 'TOTAL_CPEIP_PIE', 'TOTAL_CPEIP_NORMAL',
+            'BRP_SEP', 'BRP_PIE', 'BRP_NORMAL', 'BRP_TOTAL',
+        ]
+        for col in int_cols:
             df[col] = df[col].fillna(0).astype(int)
-        
+
         return df
     
+    def _create_multi_establishment_sheet(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """Crea hoja con desglose de docentes que trabajan en 2+ establecimientos."""
+        if 'ES_MULTI' not in df.columns:
+            return None
+
+        df_multi = df[df['ES_MULTI'] == True].copy()
+        if df_multi.empty:
+            return None
+
+        col_rbd = self.cols_actual.get('rbd')
+        col_rut = self.cols_actual.get('rut')
+        col_nombres = self.cols_actual.get('nombres')
+        col_ap1 = self.cols_actual.get('apellido1')
+        col_ap2 = self.cols_actual.get('apellido2')
+        col_horas = self.cols_actual.get('horas_contrato')
+        col_tramo = self.cols_actual.get('tramo')
+
+        rows = []
+        for rut in df_multi['RUT_NORM'].unique():
+            filas_docente = df_multi[df_multi['RUT_NORM'] == rut]
+
+            # Info del docente
+            first = filas_docente.iloc[0]
+            nombre = ''
+            if col_nombres and col_nombres in filas_docente.columns:
+                ap1 = str(first.get(col_ap1, '')) if col_ap1 else ''
+                ap2 = str(first.get(col_ap2, '')) if col_ap2 else ''
+                nombres = str(first.get(col_nombres, ''))
+                nombre = f"{ap1} {ap2} {nombres}".strip()
+                nombre = nombre.replace('nan', '').strip()
+
+            tramo = str(first.get(col_tramo, '')) if col_tramo and col_tramo in filas_docente.columns else ''
+            if tramo == 'nan':
+                tramo = ''
+
+            total_reconocimiento = 0
+            total_tramo = 0
+            total_prioritarios = 0
+            total_brp = 0
+
+            for _, fila in filas_docente.iterrows():
+                rbd_val = fila.get(col_rbd, '') if col_rbd else ''
+                horas_val = fila.get(col_horas, 0) if col_horas else 0
+                recon = fila.get('RECONOCIMIENTO_DIST', 0) or 0
+                tramo_val = fila.get('TRAMO_DIST', 0) or 0
+                prior = fila.get('ASIG_PRIOR_DIST', 0) or 0
+                brp_t = fila.get('BRP_TOTAL', 0) or 0
+
+                total_reconocimiento += recon
+                total_tramo += tramo_val
+                total_prioritarios += prior
+                total_brp += brp_t
+
+                rows.append({
+                    'RUT': rut,
+                    'NOMBRE': nombre,
+                    'TRAMO': tramo,
+                    'RBD': rbd_val,
+                    'HORAS_CONTRATO': horas_val,
+                    'RECONOCIMIENTO_MINEDUC': int(recon),
+                    'TRAMO_MINEDUC': int(tramo_val),
+                    'PRIORITARIOS_MINEDUC': int(prior),
+                    'BRP_SEP': int(fila.get('BRP_SEP', 0) or 0),
+                    'BRP_PIE': int(fila.get('BRP_PIE', 0) or 0),
+                    'BRP_NORMAL': int(fila.get('BRP_NORMAL', 0) or 0),
+                    'BRP_TOTAL': int(brp_t),
+                    'TIPO_FILA': 'DETALLE',
+                })
+
+            # Fila de total por docente
+            rows.append({
+                'RUT': rut,
+                'NOMBRE': nombre,
+                'TRAMO': tramo,
+                'RBD': 'TOTAL',
+                'HORAS_CONTRATO': filas_docente[col_horas].sum() if col_horas and col_horas in filas_docente.columns else 0,
+                'RECONOCIMIENTO_MINEDUC': int(total_reconocimiento),
+                'TRAMO_MINEDUC': int(total_tramo),
+                'PRIORITARIOS_MINEDUC': int(total_prioritarios),
+                'BRP_SEP': int(filas_docente['BRP_SEP'].sum()),
+                'BRP_PIE': int(filas_docente['BRP_PIE'].sum()),
+                'BRP_NORMAL': int(filas_docente['BRP_NORMAL'].sum()),
+                'BRP_TOTAL': int(total_brp),
+                'TIPO_FILA': 'TOTAL_DOCENTE',
+            })
+
+        result = pd.DataFrame(rows)
+        # Ordenar por RUT y luego TIPO_FILA
+        result = result.sort_values(['RUT', 'TIPO_FILA'], ascending=[True, True])
+        return result
+
     def _log_statistics(self, df: pd.DataFrame) -> None:
         """Genera estadísticas."""
         total_docentes = df['RUT_NORM'].nunique()
-        
+
         brp_sep = df['BRP_SEP'].sum()
         brp_pie = df['BRP_PIE'].sum()
         brp_normal = df['BRP_NORMAL'].sum()
         brp_total = brp_sep + brp_pie + brp_normal
-        
+
         recon_total = df['RECONOCIMIENTO_DIST'].sum() if 'RECONOCIMIENTO_DIST' in df.columns else 0
         tramo_total = df['TRAMO_DIST'].sum() if 'TRAMO_DIST' in df.columns else 0
-        
+
+        daem_total = df['TOTAL_DAEM_SEP'].sum() + df['TOTAL_DAEM_PIE'].sum() + df['TOTAL_DAEM_NORMAL'].sum()
+        cpeip_total = df['TOTAL_CPEIP_SEP'].sum() + df['TOTAL_CPEIP_PIE'].sum() + df['TOTAL_CPEIP_NORMAL'].sum()
+
         self.logger.info("=" * 60)
         self.logger.info("RESUMEN DE DISTRIBUCIÓN BRP")
         self.logger.info("=" * 60)
@@ -650,6 +967,9 @@ class BRPProcessor(BaseProcessor):
         self.logger.info("-" * 60)
         self.logger.info(f"Reconocimiento Profesional: ${recon_total:,.0f}")
         self.logger.info(f"Tramo:                      ${tramo_total:,.0f}")
+        self.logger.info("-" * 60)
+        self.logger.info(f"DAEM (Subvención):          ${daem_total:,.0f}")
+        self.logger.info(f"CPEIP (Transferencia):      ${cpeip_total:,.0f}")
         self.logger.info("-" * 60)
         if brp_total > 0:
             self.logger.info(f"→ SEP:    ${brp_sep:,.0f} ({100*brp_sep/brp_total:.1f}%)")

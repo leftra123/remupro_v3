@@ -135,3 +135,18 @@ venv.bak/
 *.bak
 *.swp
 *~
+
+# Data files (Excel/CSV de prueba, datos sensibles)
+docs/
+docs/*
+~$*.xlsx
+
+# Node.js
+node_modules/
+
+# Next.js build output
+dashboard/.next/
+dashboard/out/
+
+# Electron build output
+electron/dist/

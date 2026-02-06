@@ -5,9 +5,10 @@ Orquesta los procesadores individuales y genera auditoría completa.
 """
 
 import logging
+import os
 import tempfile
 from pathlib import Path
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, List
 
 import pandas as pd
 
@@ -47,7 +48,8 @@ class IntegradoProcessor(BaseProcessor):
         pie_bruto_path: Path,
         web_sostenedor_path: Path,
         output_path: Path,
-        progress_callback: ProgressCallback
+        progress_callback: ProgressCallback,
+        keep_intermediates: bool = False,
     ) -> Tuple[pd.DataFrame, AuditLog]:
         """
         Procesa todos los archivos en un solo flujo.
@@ -58,11 +60,15 @@ class IntegradoProcessor(BaseProcessor):
             web_sostenedor_path: Ruta al archivo web_sostenedor
             output_path: Ruta para guardar el resultado
             progress_callback: Función para reportar progreso
+            keep_intermediates: Si True, no elimina archivos intermedios
 
         Returns:
             Tupla (DataFrame resultado, AuditLog)
         """
         self.audit.start()
+        # Track intermediate temp files for cleanup
+        _temp_files_to_cleanup = []
+        self._intermediate_paths: List[Path] = []
 
         try:
             # 1. Validar archivos de entrada (0-5%)
@@ -76,6 +82,7 @@ class IntegradoProcessor(BaseProcessor):
                 sep_bruto_path,
                 lambda v, m: progress_callback(5 + int(v * 0.25), m)
             )
+            _temp_files_to_cleanup.append(sep_procesado_path)
             self.audit.info(
                 AuditLog.TIPO_ARCHIVO,
                 f"Archivo SEP procesado: {sep_bruto_path.name}"
@@ -87,6 +94,7 @@ class IntegradoProcessor(BaseProcessor):
                 pie_bruto_path,
                 lambda v, m: progress_callback(30 + int(v * 0.25), m)
             )
+            _temp_files_to_cleanup.append(pie_procesado_path)
             self.audit.info(
                 AuditLog.TIPO_ARCHIVO,
                 f"Archivo PIE procesado: {pie_bruto_path.name}"
@@ -115,7 +123,7 @@ class IntegradoProcessor(BaseProcessor):
             self._consolidate_audit()
 
             self.audit.end()
-            progress_callback(100, "¡Procesamiento integrado completado!")
+            progress_callback(100, "Procesamiento integrado completado")
 
             return df_result, self.audit
 
@@ -126,6 +134,17 @@ class IntegradoProcessor(BaseProcessor):
             )
             self.audit.end()
             raise
+        finally:
+            if keep_intermediates:
+                self._intermediate_paths = list(_temp_files_to_cleanup)
+            else:
+                # Clean up intermediate temp files containing sensitive salary data
+                for tmp_path in _temp_files_to_cleanup:
+                    try:
+                        if tmp_path and tmp_path.exists():
+                            os.unlink(tmp_path)
+                    except OSError:
+                        pass
 
     def _validate_inputs(
         self,
@@ -238,6 +257,13 @@ class IntegradoProcessor(BaseProcessor):
                             rut=caso.get('RUT')
                         )
 
+            # Propagar alertas de columnas al audit log
+            for alert in self.brp_processor.get_column_alerts():
+                if alert['nivel'] == 'error':
+                    self.audit.warning(AuditLog.TIPO_COLUMNA_FALTANTE, alert['mensaje'])
+                else:
+                    self.audit.info(AuditLog.TIPO_COLUMNA_FALTANTE, alert['mensaje'])
+
             return df
 
         except Exception as e:
@@ -348,3 +374,7 @@ class IntegradoProcessor(BaseProcessor):
     def get_docentes_revisar(self) -> list:
         """Obtiene la lista de docentes a revisar."""
         return self.brp_processor.docentes_revisar
+
+    def get_intermediate_paths(self) -> List[Path]:
+        """Retorna paths de archivos intermedios (SEP procesado, PIE procesado)."""
+        return getattr(self, '_intermediate_paths', [])

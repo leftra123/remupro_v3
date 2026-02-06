@@ -3,6 +3,7 @@ Repositorio para operaciones CRUD sobre la base de datos de BRP.
 """
 
 import os
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -11,7 +12,10 @@ import pandas as pd
 from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import sessionmaker, Session
 
-from database.models import Base, ProcesamientoMensual, DocenteMensual
+from database.models import Base, ProcesamientoMensual, DocenteMensual, ColumnAlertPreference
+
+# Strict pattern for month identifiers to prevent injection
+_MES_PATTERN = re.compile(r"^\d{4}-\d{2}$")
 
 
 class BRPRepository:
@@ -50,6 +54,15 @@ class BRPRepository:
         """Obtiene una sesión de base de datos."""
         return self.SessionLocal()
 
+    def _validate_mes(self, mes: str) -> str:
+        """Validate that mes matches YYYY-MM format to prevent injection."""
+        mes = str(mes).strip()
+        if not _MES_PATTERN.match(mes):
+            raise ValueError(
+                f"Formato de mes invalido: '{mes}'. Use YYYY-MM (ej: 2024-01)."
+            )
+        return mes
+
     def guardar_procesamiento(
         self,
         mes: str,
@@ -67,6 +80,7 @@ class BRPRepository:
         Returns:
             El objeto ProcesamientoMensual creado
         """
+        mes = self._validate_mes(mes)
         session = self._get_session()
 
         try:
@@ -215,6 +229,7 @@ class BRPRepository:
 
     def obtener_procesamiento(self, mes: str) -> Optional[ProcesamientoMensual]:
         """Obtiene un procesamiento por mes."""
+        mes = self._validate_mes(mes)
         session = self._get_session()
         try:
             return session.query(ProcesamientoMensual)\
@@ -233,6 +248,7 @@ class BRPRepository:
         Returns:
             DataFrame con los datos de docentes
         """
+        mes = self._validate_mes(mes)
         session = self._get_session()
         try:
             procesamiento = session.query(ProcesamientoMensual)\
@@ -281,6 +297,7 @@ class BRPRepository:
 
     def obtener_resumen_mes(self, mes: str) -> Optional[Dict[str, Any]]:
         """Obtiene resumen estadístico de un mes."""
+        mes = self._validate_mes(mes)
         session = self._get_session()
         try:
             proc = session.query(ProcesamientoMensual)\
@@ -309,6 +326,7 @@ class BRPRepository:
 
     def eliminar_procesamiento(self, mes: str) -> bool:
         """Elimina un procesamiento y sus docentes asociados."""
+        mes = self._validate_mes(mes)
         session = self._get_session()
         try:
             proc = session.query(ProcesamientoMensual)\
@@ -328,10 +346,241 @@ class BRPRepository:
 
     def existe_mes(self, mes: str) -> bool:
         """Verifica si existe un procesamiento para el mes."""
+        mes = self._validate_mes(mes)
         session = self._get_session()
         try:
             return session.query(ProcesamientoMensual)\
                 .filter_by(mes=mes)\
                 .count() > 0
+        finally:
+            session.close()
+
+    # ------------------------------------------------------------------
+    # Column Alert Preferences
+    # ------------------------------------------------------------------
+
+    def guardar_preferencia_columna(self, columna_key: str, estado: str) -> ColumnAlertPreference:
+        """Upsert preferencia de alerta para una columna."""
+        if estado not in ('default', 'ignore', 'important'):
+            raise ValueError(f"Estado invalido: '{estado}'. Use default/ignore/important.")
+        session = self._get_session()
+        try:
+            pref = session.query(ColumnAlertPreference)\
+                .filter_by(columna_key=columna_key)\
+                .first()
+            if pref:
+                pref.estado = estado
+            else:
+                pref = ColumnAlertPreference(columna_key=columna_key, estado=estado)
+                session.add(pref)
+            session.commit()
+            session.refresh(pref)
+            return pref
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+    def obtener_preferencias_columnas(self) -> List[Dict[str, Any]]:
+        """Lista todas las preferencias de columnas."""
+        session = self._get_session()
+        try:
+            prefs = session.query(ColumnAlertPreference).all()
+            return [
+                {
+                    'columna_key': p.columna_key,
+                    'estado': p.estado,
+                    'updated_at': p.updated_at.isoformat() if p.updated_at else None,
+                }
+                for p in prefs
+            ]
+        finally:
+            session.close()
+
+    def eliminar_preferencia_columna(self, columna_key: str) -> bool:
+        """Elimina una preferencia (reset a default)."""
+        session = self._get_session()
+        try:
+            pref = session.query(ColumnAlertPreference)\
+                .filter_by(columna_key=columna_key)\
+                .first()
+            if pref:
+                session.delete(pref)
+                session.commit()
+                return True
+            return False
+        except Exception:
+            session.rollback()
+            return False
+        finally:
+            session.close()
+
+    # ------------------------------------------------------------------
+    # Teacher search & dashboard queries
+    # ------------------------------------------------------------------
+
+    def buscar_docentes(
+        self,
+        mes: str,
+        query: str = "",
+        rbd: str = "",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Busqueda paginada de docentes por RUT/nombre, filtro RBD."""
+        mes = self._validate_mes(mes)
+        session = self._get_session()
+        try:
+            proc = session.query(ProcesamientoMensual).filter_by(mes=mes).first()
+            if not proc:
+                return {"total": 0, "docentes": [], "limit": limit, "offset": offset}
+
+            q = session.query(DocenteMensual).filter_by(procesamiento_id=proc.id)
+
+            if query:
+                pattern = f"%{query}%"
+                q = q.filter(
+                    (DocenteMensual.rut.ilike(pattern)) |
+                    (DocenteMensual.nombre.ilike(pattern))
+                )
+            if rbd:
+                q = q.filter(DocenteMensual.rbd == rbd)
+
+            total = q.count()
+            docentes = q.order_by(DocenteMensual.nombre)\
+                .offset(offset).limit(limit).all()
+
+            return {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "docentes": [
+                    {
+                        'rut': d.rut, 'nombre': d.nombre, 'rbd': d.rbd,
+                        'tipo_pago': d.tipo_pago, 'tramo': d.tramo,
+                        'horas_sep': d.horas_sep, 'horas_pie': d.horas_pie,
+                        'horas_sn': d.horas_sn, 'horas_total': d.horas_total,
+                        'brp_sep': d.brp_sep, 'brp_pie': d.brp_pie,
+                        'brp_normal': d.brp_normal, 'brp_total': d.brp_total,
+                        'es_eib': d.es_eib,
+                    }
+                    for d in docentes
+                ],
+            }
+        finally:
+            session.close()
+
+    def obtener_escuelas(self, mes: str) -> List[Dict[str, Any]]:
+        """Escuelas distintas con conteo de docentes y BRP total."""
+        mes = self._validate_mes(mes)
+        session = self._get_session()
+        try:
+            proc = session.query(ProcesamientoMensual).filter_by(mes=mes).first()
+            if not proc:
+                return []
+
+            from sqlalchemy import func
+            rows = session.query(
+                DocenteMensual.rbd,
+                func.count(DocenteMensual.id).label('docentes'),
+                func.sum(DocenteMensual.brp_total).label('brp_total'),
+                func.sum(DocenteMensual.brp_sep).label('brp_sep'),
+                func.sum(DocenteMensual.brp_pie).label('brp_pie'),
+                func.sum(DocenteMensual.brp_normal).label('brp_normal'),
+            ).filter_by(procesamiento_id=proc.id)\
+             .group_by(DocenteMensual.rbd)\
+             .order_by(DocenteMensual.rbd)\
+             .all()
+
+            return [
+                {
+                    'rbd': r.rbd,
+                    'docentes': r.docentes,
+                    'brp_total': r.brp_total or 0,
+                    'brp_sep': r.brp_sep or 0,
+                    'brp_pie': r.brp_pie or 0,
+                    'brp_normal': r.brp_normal or 0,
+                }
+                for r in rows
+            ]
+        finally:
+            session.close()
+
+    def obtener_tendencias(self) -> List[Dict[str, Any]]:
+        """Series temporales de ProcesamientoMensual para grafico de tendencias."""
+        session = self._get_session()
+        try:
+            procs = session.query(ProcesamientoMensual)\
+                .order_by(ProcesamientoMensual.mes)\
+                .all()
+            return [
+                {
+                    'mes': p.mes,
+                    'fecha_proceso': p.fecha_proceso.isoformat() if p.fecha_proceso else None,
+                    'total_docentes': p.total_docentes,
+                    'total_establecimientos': p.total_establecimientos,
+                    'brp_total': p.brp_total,
+                    'brp_sep': p.brp_sep,
+                    'brp_pie': p.brp_pie,
+                    'brp_normal': p.brp_normal,
+                    'reconocimiento_total': p.reconocimiento_total,
+                    'tramo_total': p.tramo_total,
+                    'docentes_eib': p.docentes_eib,
+                }
+                for p in procs
+            ]
+        finally:
+            session.close()
+
+    def obtener_docentes_multi_establecimiento(self, mes: str) -> List[Dict[str, Any]]:
+        """Docentes que aparecen en 2+ RBDs en un mes dado."""
+        mes = self._validate_mes(mes)
+        session = self._get_session()
+        try:
+            proc = session.query(ProcesamientoMensual).filter_by(mes=mes).first()
+            if not proc:
+                return []
+
+            from sqlalchemy import func
+            # Subquery: RUTs con 2+ RBDs distintos
+            sub = session.query(DocenteMensual.rut)\
+                .filter_by(procesamiento_id=proc.id)\
+                .group_by(DocenteMensual.rut)\
+                .having(func.count(func.distinct(DocenteMensual.rbd)) >= 2)\
+                .subquery()
+
+            docentes = session.query(DocenteMensual)\
+                .filter_by(procesamiento_id=proc.id)\
+                .filter(DocenteMensual.rut.in_(session.query(sub.c.rut)))\
+                .order_by(DocenteMensual.rut, DocenteMensual.rbd)\
+                .all()
+
+            # Agrupar por RUT
+            grouped: Dict[str, Dict[str, Any]] = {}
+            for d in docentes:
+                if d.rut not in grouped:
+                    grouped[d.rut] = {
+                        'rut': d.rut,
+                        'nombre': d.nombre,
+                        'establecimientos': [],
+                        'total_brp': 0,
+                        'total_horas': 0,
+                    }
+                grouped[d.rut]['establecimientos'].append({
+                    'rbd': d.rbd,
+                    'horas_sep': d.horas_sep,
+                    'horas_pie': d.horas_pie,
+                    'horas_sn': d.horas_sn,
+                    'horas_total': d.horas_total,
+                    'brp_sep': d.brp_sep,
+                    'brp_pie': d.brp_pie,
+                    'brp_normal': d.brp_normal,
+                    'brp_total': d.brp_total,
+                })
+                grouped[d.rut]['total_brp'] += (d.brp_total or 0)
+                grouped[d.rut]['total_horas'] += (d.horas_total or 0)
+
+            return list(grouped.values())
         finally:
             session.close()

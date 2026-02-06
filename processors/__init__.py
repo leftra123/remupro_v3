@@ -8,6 +8,8 @@ from processors.pie import PIEProcessor
 from processors.duplicados import DuplicadosProcessor
 from processors.brp import BRPProcessor
 from processors.integrado import IntegradoProcessor
+from processors.rem import REMProcessor
+from processors.anual import AnualProcessor
 
 __all__ = [
     'BaseProcessor',
@@ -18,4 +20,6 @@ __all__ = [
     'DuplicadosProcessor',
     'BRPProcessor',
     'IntegradoProcessor',
+    'REMProcessor',
+    'AnualProcessor',
 ]

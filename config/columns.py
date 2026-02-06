@@ -3,8 +3,11 @@ Configuración centralizada de columnas para procesamiento de remuneraciones.
 Esto evita duplicación y facilita el mantenimiento.
 """
 
+import re
 from dataclasses import dataclass, field
-from typing import List, Dict, FrozenSet
+from typing import List, Dict, FrozenSet, Optional
+
+import pandas as pd
 
 @dataclass(frozen=True)
 class ColumnConfig:
@@ -30,7 +33,8 @@ SPECIAL_SALARY_COLUMNS: List[str] = [
     'ASIGNACION EXPERIENCIA',
     'Antic SEG.INV.SOB.',
     'SEG.CESANTIA EMP.',
-    'MUTUAL'
+    'MUTUAL',
+    'Aporte adicional empleador'
 ]
 
 # Columnas de salarios y beneficios para prorrateo
@@ -55,21 +59,21 @@ SALARY_BENEFIT_COLUMNS: List[str] = [
     'Planilla Suplementaria', 'ART.5°TRANS. LEY20.903',
     
     # Totales y descuentos
-    '  TOTAL HABERES', '  IMPOSICIONES antic', '  SALUD',
-    '  Imposicion Voluntaria', '  MONTO IMPONIBLE', '  MONTO IMP.DESAHUCIO',
-    '  IMPUESTO UNICO', '  MONTO TRIBUTABLE', '  DIA NO TRABAJADO',
-    '  RET. JUDICIAL', '  A.P.V', '  SEGURO DE CESANTIA',
-    '  HDI CIA. DE SEGUROS', '  HDI CONDUCTORES', '  AGRUPACION CODOCENTE',
-    '  TEMUCOOP (COOPERATIVA DE AHO', '  COOPAHOCRED.KUMEMOGEN LTDA',
-    '  CRED. COOPEUCH BIENESTAR', '  PRESTAMO/ACCIONES- COOPEUCH',
-    '  MUTUAL DE SEGUROS DE CHILE', '  1% PROFESORES DE RELIGION',
-    '  CUOTA BIENESTAR 1%', '  CHILENA CONSOLIDADA - SEGURO', '  ATRASOS',
-    '  VIDA SECURITY - SEGUROS DE V', '  BIENESTAR CUOTA INCORP. CUO',
-    '  REINTEGRO', '  CAJA LOS ANDES - SEGUROS Y P', '  CAJA LOS ANDES - AHORRO',
-    '  COLEGIO PROFESORES 1%', '  APORTE SEG. INV. SOB.', '  REINTEGRO BIENIO',
-    '  1% ASOC.AGFAE', '  AHORRO AFP', '  RETENCION POR LICEN. MEDICA',
-    '  BONO DOCENTE', '  SEGURO DE CESANTIA', '  SEGURO FALP',
-    '  COLEGIO PROFESORES 1% HABER', '  Ajuste IMPOSICIONES'
+    'TOTAL HABERES', 'IMPOSICIONES antic', 'SALUD',
+    'Imposicion Voluntaria', 'MONTO IMPONIBLE', 'MONTO IMP.DESAHUCIO',
+    'IMPUESTO UNICO', 'MONTO TRIBUTABLE', 'DIA NO TRABAJADO',
+    'RET. JUDICIAL', 'A.P.V', 'SEGURO DE CESANTIA',
+    'HDI CIA. DE SEGUROS', 'HDI CONDUCTORES', 'AGRUPACION CODOCENTE',
+    'TEMUCOOP (COOPERATIVA DE AHO', 'COOPAHOCRED.KUMEMOGEN LTDA',
+    'CRED. COOPEUCH BIENESTAR', 'PRESTAMO/ACCIONES- COOPEUCH',
+    'MUTUAL DE SEGUROS DE CHILE', '1% PROFESORES DE RELIGION',
+    'CUOTA BIENESTAR 1%', 'CHILENA CONSOLIDADA - SEGURO', 'ATRASOS',
+    'VIDA SECURITY - SEGUROS DE V', 'BIENESTAR CUOTA INCORP. CUO',
+    'REINTEGRO', 'CAJA LOS ANDES - SEGUROS Y P', 'CAJA LOS ANDES - AHORRO',
+    'COLEGIO PROFESORES 1%', 'APORTE SEG. INV. SOB.', 'REINTEGRO BIENIO',
+    '1% ASOC.AGFAE', 'AHORRO AFP', 'RETENCION POR LICEN. MEDICA',
+    'BONO DOCENTE', 'SEGURO DE CESANTIA', 'SEGURO FALP',
+    'COLEGIO PROFESORES 1% HABER', 'Ajuste IMPOSICIONES'
 ]
 
 # Columnas del archivo web_sostenedor (MINEDUC)
@@ -100,7 +104,45 @@ WEB_SOSTENEDOR_COLUMNS: Dict[str, str] = {
     'porcentaje_prioritarios': 'Porcentaje Alumnos Prioritarios',
     'sep': 'SEP',
     'pie': 'PIE',
-    'general': 'GENERAL'
+    'general': 'GENERAL',
+    # Columnas de metadata
+    'tipo_pago': 'Tipo de pago',
+    'periodo': 'Período',
+    'mes': 'Mes',
+    'anio': 'Año',
+    # Columnas informativas adicionales
+    'derecho_tramo': 'Derecho a pago asignación de tramo',
+    'derecho_prioritario': 'Derecho a prioritario',
+    'desempeno_dificil_total': 'Total Asignación por Desem Dificil',
+    'desempeno_dificil_pagar': 'A pagar docente desempeño difícil',
+}
+
+# Columnas MINEDUC que afectan cálculo (si faltan → montos $0)
+WEB_CRITICAL_COLUMNS = {
+    'total_reconocimiento', 'total_tramo',
+    'subv_reconocimiento', 'transf_reconocimiento',
+    'subv_tramo', 'transf_tramo', 'asig_prioritarios',
+}
+
+# Columnas MINEDUC informativas (si faltan → no afectan cálculo)
+WEB_INFO_COLUMNS = {
+    'nombres', 'apellido1', 'apellido2', 'tipo_pago', 'tramo',
+}
+
+# Nombres amigables para mostrar al usuario
+WEB_FRIENDLY_NAMES = {
+    'total_reconocimiento': 'Total reconocimiento profesional',
+    'total_tramo': 'Total tramo',
+    'subv_reconocimiento': 'Subvención reconocimiento (DAEM)',
+    'transf_reconocimiento': 'Transferencia reconocimiento (CPEIP)',
+    'subv_tramo': 'Subvención tramo (DAEM)',
+    'transf_tramo': 'Transferencia tramo (CPEIP)',
+    'asig_prioritarios': 'Asignación alumnos prioritarios (CPEIP)',
+    'nombres': 'Nombres del docente',
+    'apellido1': 'Primer apellido',
+    'apellido2': 'Segundo apellido',
+    'tipo_pago': 'Tipo de pago',
+    'tramo': 'Tramo',
 }
 
 
@@ -111,6 +153,89 @@ def get_available_columns(df, column_list: List[str]) -> List[str]:
 
 def normalize_rut(rut) -> str:
     """Normaliza un RUT chileno removiendo puntos y guiones."""
-    if rut is None or (isinstance(rut, float) and str(rut) == 'nan'):
-        return ''
+    try:
+        import pandas as pd
+        if rut is None or pd.isna(rut):
+            return ''
+    except (TypeError, ValueError):
+        if rut is None:
+            return ''
     return str(rut).strip().upper().replace('.', '').replace('-', '').replace(' ', '')
+
+
+def format_rut(rut) -> str:
+    """Formatea un RUT normalizado con guión: 12345678-9."""
+    rut_str = normalize_rut(rut)
+    if len(rut_str) < 2:
+        return rut_str
+    return f"{rut_str[:-1]}-{rut_str[-1]}"
+
+
+# ---------------------------------------------------------------------------
+# Limpieza de columnas
+# ---------------------------------------------------------------------------
+
+def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip espacios en nombres de columna, drop columnas vacías y unnamed."""
+    df.columns = df.columns.str.strip()
+    # Eliminar columnas tipo 'Unnamed: N'
+    unnamed = [c for c in df.columns if re.match(r'^Unnamed:\s*\d+', str(c), re.IGNORECASE)]
+    if unnamed:
+        df = df.drop(columns=unnamed)
+    # Eliminar columnas completamente vacías (sin nombre)
+    df = df.loc[:, df.columns.astype(bool)]
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Clasificación de contratos
+# ---------------------------------------------------------------------------
+
+_SEP_KEYWORDS = ['SEP']
+_PIE_KEYWORDS = ['PIE']
+_EIB_KEYWORDS = ['EIB']
+
+
+def classify_contract(tipocontrato: str) -> str:
+    """Clasifica un tipo de contrato en SEP/PIE/EIB/NORMAL."""
+    tc = str(tipocontrato).upper().strip()
+    if any(k in tc for k in _SEP_KEYWORDS):
+        return 'SEP'
+    if any(k in tc for k in _PIE_KEYWORDS):
+        return 'PIE'
+    if any(k in tc for k in _EIB_KEYWORDS):
+        return 'EIB'
+    return 'NORMAL'
+
+
+# ---------------------------------------------------------------------------
+# Meses y periodos
+# ---------------------------------------------------------------------------
+
+MESES_MAP: Dict[str, str] = {
+    'ene': '01', 'feb': '02', 'mar': '03', 'abr': '04',
+    'may': '05', 'jun': '06', 'jul': '07', 'ago': '08',
+    'sep': '09', 'oct': '10', 'nov': '11', 'dic': '12',
+}
+
+
+def parse_periodo(periodo: str) -> Optional[str]:
+    """
+    Convierte un periodo como 'ene-25' a formato 'YYYY-MM'.
+
+    Retorna None si no puede parsear.
+    """
+    periodo = str(periodo).strip().lower()
+    # Formato 'mmm-YY' (ej: 'ene-25')
+    m = re.match(r'^([a-z]{3})-(\d{2})$', periodo)
+    if m:
+        mes_str, anio_str = m.group(1), m.group(2)
+        mes_num = MESES_MAP.get(mes_str)
+        if mes_num:
+            anio = 2000 + int(anio_str)
+            return f"{anio}-{mes_num}"
+    # Formato 'YYYY-MM' (ya normalizado)
+    m = re.match(r'^(\d{4})-(\d{2})$', periodo)
+    if m:
+        return periodo
+    return None
