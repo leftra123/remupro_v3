@@ -28,7 +28,7 @@ const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/upload", label: "Subir Archivos", icon: Upload },
   { href: "/results", label: "Resultados", icon: Table2 },
-  { href: "/multi-establecimiento", label: "Multi-Establecimiento", icon: Building2 },
+  { href: "/multi-establecimiento", label: "Distribucion por Escuela", icon: Building2 },
   { href: "/auditoria", label: "Auditoria", icon: ClipboardList },
   { href: "/alertas", label: "Alertas", icon: Bell },
   { href: "/anual", label: "Liquidacion Anual", icon: CalendarDays },
@@ -36,7 +36,7 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { summary, isDemo, sessionId, auditLog, selectedMonth } = useAppState();
+  const { summary, sessionId, auditLog, selectedMonth } = useAppState();
   const [collapsed, setCollapsed] = useState(false);
 
   const warningCount = auditLog.filter((e) => e.nivel === "WARNING").length;
@@ -75,15 +75,9 @@ export function Sidebar() {
       {/* Status */}
       {!collapsed && (
         <div className="px-4 py-3 space-y-2">
-          {sessionId ? (
-            <Badge variant={isDemo ? "secondary" : "default"} className="w-full justify-center">
-              {isDemo ? "Modo Demo" : "Datos Cargados"}
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="w-full justify-center">
-              Sin datos
-            </Badge>
-          )}
+          <Badge variant={sessionId ? "default" : "outline"} className="w-full justify-center">
+            {sessionId ? "Datos Cargados" : "Sin datos"}
+          </Badge>
           {selectedMonth && (
             <div className="text-xs text-center text-muted-foreground">
               Mes: <span className="font-medium text-foreground">{selectedMonth}</span>
@@ -95,7 +89,7 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-2 py-2">
         {NAV_ITEMS.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
           return (
             <Link
               key={item.href}

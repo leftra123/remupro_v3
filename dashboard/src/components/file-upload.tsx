@@ -66,23 +66,17 @@ export function FileUpload() {
           return updated;
         });
         addUploadedFile(response);
-      } catch {
-        const mockResponse: UploadResponse = {
-          file_id: `mock-${Date.now()}-${i}`,
-          filename: fileInfo.file.name,
-          detected_type: detectFileType(fileInfo.file.name) as UploadResponse["detected_type"],
-        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Error al subir el archivo";
         setFiles((prev) => {
           const updated = [...prev];
           updated[idx] = {
             ...updated[idx],
-            status: "success",
-            response: mockResponse,
-            error: "Modo offline - archivo registrado localmente",
+            status: "error",
+            error: message,
           };
           return updated;
         });
-        addUploadedFile(mockResponse);
       }
     }
 
@@ -159,19 +153,19 @@ export function FileUpload() {
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="flex items-center gap-2">
               <Badge variant="daem" className="text-[10px]">WEB</Badge>
-              <span className="text-muted-foreground">web_sostenedor*.xlsx</span>
+              <span className="text-muted-foreground">web* / *sostenedor*</span>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="sep" className="text-[10px]">SEP</Badge>
-              <span className="text-muted-foreground">sep*.xlsx</span>
+              <span className="text-muted-foreground">*sep*</span>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="pie" className="text-[10px]">PIE</Badge>
-              <span className="text-muted-foreground">sn*.xlsx / *pie*.xlsx</span>
+              <span className="text-muted-foreground">sn* / *pie* / *normal*</span>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="normal" className="text-[10px]">REM</Badge>
-              <span className="text-muted-foreground">rem*.csv / rem*.xlsx</span>
+              <span className="text-muted-foreground">*rem*</span>
             </div>
           </div>
         </CardContent>

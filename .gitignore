@@ -124,8 +124,12 @@ venv.bak/
 # Streamlit
 .streamlit/secrets.toml
 
-# VSCode
+# IDE / AI Assistants
 .vscode/
+.claude/
+.agents/
+.cursor/
+.windsurf/
 
 # macOS
 .DS_Store

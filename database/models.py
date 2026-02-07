@@ -39,6 +39,10 @@ class ProcesamientoMensual(Base):
     reconocimiento_total = Column(Float, default=0)
     tramo_total = Column(Float, default=0)
 
+    # DAEM vs CPEIP
+    daem_total = Column(Float, default=0)
+    cpeip_total = Column(Float, default=0)
+
     # Casos de revisión
     casos_revisar = Column(Integer, default=0)
     docentes_eib = Column(Integer, default=0)

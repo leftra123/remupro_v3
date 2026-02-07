@@ -217,11 +217,7 @@ class ComparadorMeses:
                 pie_act = df_act.loc[rut, 'horas_pie'] if 'horas_pie' in df_act.columns else 0
                 sn_act = df_act.loc[rut, 'horas_sn'] if 'horas_sn' in df_act.columns else 0
 
-                # Sumar si hay múltiples filas
-                for var in [sep_ant, pie_ant, sn_ant, sep_act, pie_act, sn_act]:
-                    if isinstance(var, pd.Series):
-                        var = var.sum()
-
+                # Sumar si hay múltiples filas (loc puede retornar Series si hay duplicados)
                 if isinstance(sep_ant, pd.Series):
                     sep_ant = sep_ant.sum()
                 if isinstance(pie_ant, pd.Series):

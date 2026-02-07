@@ -17,6 +17,7 @@ from processors import (
 from reports import AuditLog, InformeWord
 from database import BRPRepository, ComparadorMeses
 from config.columns import format_rut
+from config.escuelas import get_rbd_map
 import html as html_module
 import json
 
@@ -566,7 +567,7 @@ def show_audit_log_detailed(audit):
                     f'<div class="audit-entry">'
                     f'<span class="audit-time">{time_str}</span>'
                     f'<span class="audit-badge {bcls}">{e.nivel}</span>'
-                    f'<span class="audit-msg">{e.mensaje}</span>'
+                    f'<span class="audit-msg">{_sanitize_html(e.mensaje)}</span>'
                     f'</div>'
                 )
             st.markdown("".join(rows_html), unsafe_allow_html=True)
@@ -610,20 +611,9 @@ def format_user_error(e: Exception) -> str:
         return f"Ocurrió un error. Detalle: {error_str}"
 
 
-@st.cache_data
-def load_escuelas():
-    """Carga mapa de RBD → nombre de escuela desde config/escuelas.json."""
-    try:
-        escuelas_path = Path(__file__).parent / 'config' / 'escuelas.json'
-        with open(escuelas_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
 def add_school_names(df, rbd_col='RBD'):
     """Agrega columna ESCUELA al DataFrame basándose en el RBD."""
-    escuelas = load_escuelas()
+    escuelas = get_rbd_map()
     if not escuelas or rbd_col not in df.columns:
         return df
     df = df.copy()
@@ -886,7 +876,7 @@ def show_multi_establishment(out_path):
         return
 
     # Agregar nombres de escuela a los RBD
-    escuelas = load_escuelas()
+    escuelas = get_rbd_map()
 
     # Formatear RUT
     df_multi = df_multi.copy()
@@ -1204,7 +1194,7 @@ def tab_brp():
             ("Distribuye", "El sistema calcula BRP para SEP, PIE y NORMAL.")
         ])
     
-    info_box("Los archivos se detectan por nombre: <b>web*</b> → MINEDUC, <b>sep*</b> → SEP, <b>sn*</b> → PIE/Normal")
+    info_box("Los archivos se detectan por nombre: <b>web*</b> → MINEDUC, <b>*sep*</b> → SEP, <b>*pie*/*sn*/*normal*</b> → PIE/Normal")
     
     st.markdown("---")
     
@@ -1226,9 +1216,9 @@ def tab_brp():
         name_lower = f.name.lower()
         if name_lower.startswith('web'):
             st.session_state.brp_files['web'] = f
-        elif name_lower.startswith('sep'):
+        elif name_lower.startswith('sep') or 'sep' in name_lower:
             st.session_state.brp_files['sep'] = f
-        elif name_lower.startswith('sn') or 'pie' in name_lower:
+        elif name_lower.startswith('sn') or 'pie' in name_lower or 'normal' in name_lower:
             st.session_state.brp_files['pie'] = f
     
     # Mostrar estado de archivos
@@ -1249,7 +1239,7 @@ def tab_brp():
         if f_sep:
             st.success(f"✓ {f_sep.name}")
         else:
-            st.warning("⬜ No detectado (nombre debe empezar con 'sep')")
+            st.warning("⬜ No detectado (nombre debe contener 'sep')")
     
     with col3:
         st.markdown("**📊 PIE/Normal procesado**")
@@ -1257,7 +1247,7 @@ def tab_brp():
         if f_pie:
             st.success(f"✓ {f_pie.name}")
         else:
-            st.warning("⬜ No detectado (nombre debe empezar con 'sn')")
+            st.warning("⬜ No detectado (nombre debe contener 'sn', 'pie' o 'normal')")
     
     # Botón para limpiar
     if st.button("🔄 Limpiar archivos", key="btn_clear_brp"):
@@ -1451,8 +1441,8 @@ def tab_brp():
 
                 st.markdown("##### 🏫 Distribución por Escuela")
                 show_charts_by_school(df_rbd)
-            except:
-                pass
+            except (ValueError, KeyError):
+                pass  # Sheet RESUMEN_POR_RBD not present in file
 
             # Multi-Establecimiento
             show_multi_establishment(out_path)
@@ -1533,7 +1523,7 @@ def tab_brp():
 
                 with st.expander("👀 Ver casos a revisar"):
                     show_revision_table(df_revision)
-            except:
+            except (ValueError, KeyError):
                 st.success("✅ No hay casos pendientes de revisión")
         
         except Exception as e:
@@ -2270,7 +2260,7 @@ def main():
         st.caption(f"v{VERSION}")
         st.markdown("---")
 
-        escuelas = load_escuelas()
+        escuelas = get_rbd_map()
         st.markdown(f"**🏫 Establecimientos:** {len(escuelas)}")
 
         # Mostrar lista de escuelas

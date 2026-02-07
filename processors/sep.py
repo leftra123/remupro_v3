@@ -2,7 +2,6 @@
 Procesador para remuneraciones SEP (Subvención Escolar Preferencial).
 """
 
-import logging
 from pathlib import Path
 import pandas as pd
 
@@ -80,7 +79,7 @@ class SEPProcessor(BaseProcessor):
         progress_callback(30, "Combinando datos...")
         
         # Combinar con datos de total
-        datos = pd.merge(df_total, df_horas, on=['Rut'], how='left')
+        datos = pd.merge(df_total, df_horas, on=['Rut'], how='left').reset_index(drop=True)
         
         # Rellenar valores faltantes
         datos = datos.fillna({

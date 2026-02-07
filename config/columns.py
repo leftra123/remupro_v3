@@ -154,7 +154,6 @@ def get_available_columns(df, column_list: List[str]) -> List[str]:
 def normalize_rut(rut) -> str:
     """Normaliza un RUT chileno removiendo puntos y guiones."""
     try:
-        import pandas as pd
         if rut is None or pd.isna(rut):
             return ''
     except (TypeError, ValueError):

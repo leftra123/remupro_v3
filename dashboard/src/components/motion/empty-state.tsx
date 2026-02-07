@@ -9,10 +9,9 @@ interface EmptyStateProps {
   icon: LucideIcon;
   title: string;
   description: string;
-  onDemo?: () => void;
 }
 
-export function EmptyState({ icon: Icon, title, description, onDemo }: EmptyStateProps) {
+export function EmptyState({ icon: Icon, title, description }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-6">
       <motion.div
@@ -47,11 +46,6 @@ export function EmptyState({ icon: Icon, title, description, onDemo }: EmptyStat
         <Link href="/upload">
           <Button>Subir Archivos</Button>
         </Link>
-        {onDemo && (
-          <Button variant="outline" onClick={onDemo}>
-            Ver Demo
-          </Button>
-        )}
       </motion.div>
     </div>
   );

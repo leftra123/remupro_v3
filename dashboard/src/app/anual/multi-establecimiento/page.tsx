@@ -59,16 +59,20 @@ function MultiEstablecimientoContent() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getAnualYears().then(setYears).catch(() => {});
+    let cancelled = false;
+    getAnualYears().then((y) => { if (!cancelled) setYears(y); }).catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!selectedYear) return;
+    let cancelled = false;
     setLoading(true);
     getAnualMultiEstablishment(selectedYear)
-      .then(setDocentes)
-      .catch(() => setDocentes([]))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!cancelled) setDocentes(d); })
+      .catch(() => { if (!cancelled) setDocentes([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [selectedYear]);
 
   // Collect all months for timeline

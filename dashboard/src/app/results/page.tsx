@@ -49,7 +49,7 @@ type SortDir = "asc" | "desc";
 type SubsidyFilter = "all" | "sep" | "pie" | "normal";
 
 export default function ResultsPage() {
-  const { records, sessionId, summary, loadDemoData } = useAppState();
+  const { records, sessionId, summary } = useAppState();
   const [searchQuery, setSearchQuery] = useState("");
   const [schoolFilter, setSchoolFilter] = useState("all");
   const [subsidyFilter, setSubsidyFilter] = useState<SubsidyFilter>("all");
@@ -131,7 +131,6 @@ export default function ResultsPage() {
           icon={BarChart3}
           title="No hay resultados disponibles"
           description="Suba y procese archivos para ver los resultados de distribucion BRP."
-          onDemo={loadDemoData}
         />
       </PageTransition>
     );
@@ -162,7 +161,7 @@ export default function ResultsPage() {
         </div>
 
         {/* Download selector */}
-        {sessionId && sessionId !== "demo" && (
+        {sessionId && (
           <DownloadSelector sessionId={sessionId} />
         )}
 

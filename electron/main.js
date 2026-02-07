@@ -134,6 +134,35 @@ async function createWindow() {
     mainWindow.loadURL("http://localhost:3000");
   }
 
+  // Intercept navigation to absolute paths (e.g. file:///multi-establecimiento)
+  // and resolve them to the correct HTML files in dashboard/out/
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("file:///")) return;
+    // Ignore if already pointing to our dashboard directory
+    if (url.includes(DASHBOARD_DIR)) return;
+
+    event.preventDefault();
+    const urlPath = new URL(url).pathname; // e.g. "/multi-establecimiento"
+
+    // Try pageName.html first, then pageName/index.html, then fallback to index.html
+    const candidates = [
+      path.join(DASHBOARD_DIR, urlPath + ".html"),
+      path.join(DASHBOARD_DIR, urlPath, "index.html"),
+      path.join(DASHBOARD_DIR, "index.html"),
+    ];
+
+    for (const candidate of candidates) {
+      // Prevent path traversal: ensure resolved path stays within DASHBOARD_DIR
+      const resolved = path.resolve(candidate);
+      if (!resolved.startsWith(path.resolve(DASHBOARD_DIR))) continue;
+      if (fs.existsSync(resolved)) {
+        mainWindow.loadFile(resolved);
+        return;
+      }
+    }
+    mainWindow.loadFile(indexPath);
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });

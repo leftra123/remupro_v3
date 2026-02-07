@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronRight, AlertTriangle, Building2 } from "lucide-react";
+import { ChevronRight, AlertTriangle, Building2 } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmptyState } from "@/components/motion/empty-state";
-import { formatCLP, formatRUT, formatNumber } from "@/lib/utils";
+import { formatCLP, formatRUT } from "@/lib/utils";
 import type { MultiEstablishmentRecord } from "@/lib/api";
 
 interface MultiEstablishmentTableProps {

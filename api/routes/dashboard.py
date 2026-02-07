@@ -65,7 +65,8 @@ async def get_comparison(
     """Comparacion entre dos meses."""
     try:
         from database.comparador import ComparadorMeses
-        comparador = ComparadorMeses()
+        repo = _get_repo()
+        comparador = ComparadorMeses(repo)
         resultado = comparador.comparar(mes_anterior, mes_actual)
         return ComparisonResponse(
             mes_anterior=mes_anterior,
@@ -74,7 +75,7 @@ async def get_comparison(
             cambios=resultado.get("cambios", []),
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Error al comparar meses. Verifique que ambos meses existan.")
 
 
 @router.get("/teachers/{mes}", response_model=TeacherSearchResponse)

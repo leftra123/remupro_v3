@@ -12,7 +12,7 @@ import { FileUpload } from "@/components/file-upload";
 import { DownloadSelector } from "@/components/download-selector";
 import { PageTransition } from "@/components/motion/page-transition";
 import { useAppState } from "@/lib/store";
-import { processIntegrado } from "@/lib/api";
+import { processIntegrado, processAnual } from "@/lib/api";
 import { useRouter } from "next/navigation";
 
 function getCurrentYYYYMM(): string {
@@ -32,7 +32,6 @@ export default function UploadPage() {
     setResults,
     setSessionId,
     sessionId,
-    loadDemoData,
   } = useAppState();
   const router = useRouter();
   const [mes, setMes] = useState(getCurrentYYYYMM());
@@ -73,6 +72,16 @@ export default function UploadPage() {
         schoolSummary: result.school_summary,
       });
 
+      // Process anual file if uploaded
+      if (anualFile) {
+        setProcessing(true, 85, "Procesando archivo anual...");
+        try {
+          await processAnual(anualFile.file_id);
+        } catch (anualErr) {
+          console.warn("Anual processing failed:", anualErr);
+        }
+      }
+
       setProcessing(true, 100, "Completado!");
       setProcessingComplete(true);
       setTimeout(() => {
@@ -86,11 +95,6 @@ export default function UploadPage() {
           : "Error desconocido al procesar los archivos"
       );
     }
-  };
-
-  const handleDemoMode = () => {
-    loadDemoData();
-    router.push("/");
   };
 
   return (
@@ -192,15 +196,12 @@ export default function UploadPage() {
                   </>
                 )}
               </Button>
-              <Button variant="outline" onClick={handleDemoMode}>
-                Modo Demo
-              </Button>
             </div>
           </CardContent>
         </Card>
 
         {/* Download selector after processing */}
-        {processingComplete && sessionId && sessionId !== "demo" && (
+        {processingComplete && sessionId && (
           <DownloadSelector sessionId={sessionId} />
         )}
 

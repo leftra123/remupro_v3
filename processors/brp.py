@@ -654,25 +654,6 @@ class BRPProcessor(BaseProcessor):
         
         return revisar
     
-    def _save_revision_file(self, path: Path) -> None:
-        """Guarda archivo de revisión."""
-        df = pd.DataFrame(self.docentes_revisar)
-        
-        # Ordenar
-        df['_orden'] = df['MOTIVO'].map({'EXCEDE 44 HORAS': 0, 'SIN LIQUIDACIÓN': 1})
-        df = df.sort_values(['_orden', 'HORAS_TOTAL'], ascending=[True, False])
-        df = df.drop('_orden', axis=1)
-        
-        # Reordenar columnas
-        cols_order = ['RUT', 'NOMBRE', 'APELLIDOS', 'TIPO_PAGO', 'MOTIVO', 
-                      'HORAS_SEP', 'HORAS_PIE', 'HORAS_SN', 'HORAS_TOTAL', 
-                      'EXCESO', 'DETALLE', 'ACCION']
-        cols_exist = [c for c in cols_order if c in df.columns]
-        df = df[cols_exist + [c for c in df.columns if c not in cols_exist]]
-        
-        self.safe_save(df, path)
-        self.logger.info(f"📋 Archivo de revisión: {path.name} ({len(df)} casos)")
-    
     def _identify_multi_establishment(self, df: pd.DataFrame) -> pd.DataFrame:
         """Identifica docentes en múltiples establecimientos."""
         col_horas = self.cols_actual['horas_contrato']

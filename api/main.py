@@ -16,6 +16,7 @@ Run with:
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -50,6 +51,25 @@ logger = logging.getLogger("api")
 # Set REMUPRO_ENV=development to enable /docs and /redoc.
 _is_dev = os.environ.get("REMUPRO_ENV", "").lower() == "development"
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("RemuPro API v3.0.0 starting up")
+    logger.info("Project root: %s", _project_root)
+    if _is_dev:
+        logger.info("Docs available at /docs")
+    yield
+    logger.info("RemuPro API shutting down")
+    # Cleanup temp files from all active sessions
+    from api.session_store import store
+    for session in list(store._sessions.values()):
+        session.cleanup_files()
+    import shutil
+    if store.upload_dir.exists():
+        shutil.rmtree(store.upload_dir, ignore_errors=True)
+    logger.info("Temp files cleaned up")
+
+
 app = FastAPI(
     title="RemuPro API",
     version="3.0.0",
@@ -60,6 +80,7 @@ app = FastAPI(
     ),
     docs_url="/docs" if _is_dev else None,
     redoc_url="/redoc" if _is_dev else None,
+    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
@@ -156,18 +177,3 @@ async def health_check():
     )
 
 
-# ---------------------------------------------------------------------------
-# Startup / Shutdown events
-# ---------------------------------------------------------------------------
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("RemuPro API v3.0.0 starting up")
-    logger.info("Project root: %s", _project_root)
-    logger.info("Docs available at /docs")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("RemuPro API shutting down")
-    # Cleanup could happen here (temp files, etc.)

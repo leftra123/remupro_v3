@@ -48,7 +48,7 @@ const D3Treemap = dynamic(() => import("@/components/charts/d3-treemap").then((m
 
 export default function DashboardPage() {
   const {
-    summary, schoolSummary, records, sessionId, isDemo, loadDemoData,
+    summary, schoolSummary, records, sessionId,
     selectedMonth, setSelectedMonth, availableMonths, setAvailableMonths,
     historicalSummary, setHistoricalSummary, trends, setTrends,
   } = useAppState();
@@ -57,12 +57,14 @@ export default function DashboardPage() {
 
   // Load available months and trends on mount
   useEffect(() => {
+    let cancelled = false;
     const loadDashboardData = async () => {
       try {
         const [months, trendsData] = await Promise.all([
           getAvailableMonths(),
           getTrends(),
         ]);
+        if (cancelled) return;
         setAvailableMonths(months);
         setTrends(trendsData);
       } catch {
@@ -70,6 +72,7 @@ export default function DashboardPage() {
       }
     };
     loadDashboardData();
+    return () => { cancelled = true; };
   }, [setAvailableMonths, setTrends]);
 
   // Load historical summary when month changes
@@ -78,18 +81,21 @@ export default function DashboardPage() {
       setHistoricalSummary(null);
       return;
     }
+    let cancelled = false;
     const loadMonth = async () => {
       setLoadingHistorical(true);
       try {
         const data = await getMonthSummary(selectedMonth);
+        if (cancelled) return;
         setHistoricalSummary(data);
       } catch {
-        setHistoricalSummary(null);
+        if (!cancelled) setHistoricalSummary(null);
       } finally {
-        setLoadingHistorical(false);
+        if (!cancelled) setLoadingHistorical(false);
       }
     };
     loadMonth();
+    return () => { cancelled = true; };
   }, [selectedMonth, setHistoricalSummary]);
 
   // Determine which summary to display: historical or current session
@@ -145,9 +151,6 @@ export default function DashboardPage() {
             <Link href="/upload">
               <Button size="lg">Subir Archivos</Button>
             </Link>
-            <Button variant="outline" size="lg" onClick={loadDemoData}>
-              Ver Demo
-            </Button>
           </motion.div>
           <StaggerContainer className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl w-full mt-8" staggerDelay={0.15}>
             <StaggerItem>
@@ -204,17 +207,12 @@ export default function DashboardPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="current">Sesion actual</SelectItem>
-                    {availableMonths.map((m) => (
+                    {availableMonths.filter((m) => m).map((m) => (
                       <SelectItem key={m} value={m}>{m}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-            )}
-            {isDemo && (
-              <Badge variant="secondary" className="text-sm">
-                Modo Demo
-              </Badge>
             )}
           </div>
         </div>

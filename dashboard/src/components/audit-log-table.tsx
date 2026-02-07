@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Filter, Search, AlertCircle, AlertTriangle, Info } from "lucide-react";
+import { Search, AlertCircle, AlertTriangle, Info } from "lucide-react";
 import {
   Table,
   TableBody,

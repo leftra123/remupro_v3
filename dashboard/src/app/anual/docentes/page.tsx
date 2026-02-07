@@ -65,13 +65,16 @@ function DocentesAnualContent() {
   const limit = 50;
 
   useEffect(() => {
-    getAnualYears().then(setYears).catch(() => {});
+    let cancelled = false;
+    getAnualYears().then((y) => { if (!cancelled) setYears(y); }).catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-    if (selectedYear) {
-      getAnualSchools(selectedYear).then(setSchools).catch(() => {});
-    }
+    if (!selectedYear) return;
+    let cancelled = false;
+    getAnualSchools(selectedYear).then((s) => { if (!cancelled) setSchools(s); }).catch(() => {});
+    return () => { cancelled = true; };
   }, [selectedYear]);
 
   const doSearch = (newOffset = 0) => {
@@ -90,7 +93,23 @@ function DocentesAnualContent() {
   };
 
   useEffect(() => {
-    if (selectedYear) doSearch(0);
+    if (!selectedYear) return;
+    let cancelled = false;
+    setLoading(true);
+    setOffset(0);
+    searchAnualTeachers(selectedYear, query, rbd, limit, 0)
+      .then((res) => {
+        if (cancelled) return;
+        setResults(res.docentes as unknown as TeacherRow[]);
+        setTotal(res.total);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setResults([]);
+        setTotal(0);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear, rbd]);
 

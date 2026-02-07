@@ -108,7 +108,7 @@ async def process_anual(
 
         except Exception as e:
             logger.exception("Error en procesamiento anual")
-            session.set_failed(str(e))
+            session.set_failed("Error al procesar archivo anual. Verifique el formato del archivo.")
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()

@@ -11,7 +11,7 @@ import { useAppState } from "@/lib/store";
 import Link from "next/link";
 
 export default function AuditoriaPage() {
-  const { auditLog, sessionId, loadDemoData, columnPreferences } = useAppState();
+  const { auditLog, sessionId, columnPreferences } = useAppState();
 
   if (!sessionId) {
     return (
@@ -20,7 +20,6 @@ export default function AuditoriaPage() {
           icon={ClipboardList}
           title="No hay registros de auditoria"
           description="Suba y procese archivos para ver el log de auditoria."
-          onDemo={loadDemoData}
         />
       </PageTransition>
     );

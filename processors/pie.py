@@ -3,7 +3,6 @@ Procesador para remuneraciones PIE (Programa de Integración Escolar).
 Maneja tanto horas PIE como SN (Subvención Normal).
 """
 
-import logging
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -100,7 +99,7 @@ class PIEProcessor(BaseProcessor):
         progress_callback(30, "Combinando datos...")
         
         # Combinar con df_total
-        datos = pd.merge(df_total, df_horas, on=['Rut'], how='left')
+        datos = pd.merge(df_total, df_horas, on=['Rut'], how='left').reset_index(drop=True)
         
         # Rellenar valores faltantes
         fill_values = {
@@ -140,16 +139,20 @@ class PIEProcessor(BaseProcessor):
         return datos
     
     def _process_special_columns(
-        self, 
-        df: pd.DataFrame, 
-        pie_col: str, 
+        self,
+        df: pd.DataFrame,
+        pie_col: str,
         sn_col: str
     ) -> pd.DataFrame:
         """
         Procesa columnas especiales creando versiones separadas para PIE y SN.
         """
+        # Deduplicar columnas tras merge (puede generar duplicados)
+        if df.columns.duplicated().any():
+            df = df.loc[:, ~df.columns.duplicated(keep='first')]
+
         available = get_available_columns(df, SPECIAL_SALARY_COLUMNS)
-        
+
         for col in available:
             valor_por_hora = df[col] / df['TOTAL HORAS POR DOCENTE']
             valor_por_hora = valor_por_hora.replace([np.inf, -np.inf, np.nan], 0)
@@ -164,14 +167,18 @@ class PIEProcessor(BaseProcessor):
         return df
     
     def _process_salary_columns(
-        self, 
-        df: pd.DataFrame, 
-        pie_col: str, 
+        self,
+        df: pd.DataFrame,
+        pie_col: str,
         sn_col: str
     ) -> pd.DataFrame:
         """
         Procesa columnas de salario con suma de PIE + SN.
         """
+        # Deduplicar columnas tras merge (puede generar duplicados)
+        if df.columns.duplicated().any():
+            df = df.loc[:, ~df.columns.duplicated(keep='first')]
+
         # Crear columna de suma de horas por fila
         df['SUMA POR FILA'] = df[pie_col]
         if sn_col in df.columns:

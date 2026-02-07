@@ -48,16 +48,20 @@ function EscuelasAnualContent() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getAnualYears().then(setYears).catch(() => {});
+    let cancelled = false;
+    getAnualYears().then((y) => { if (!cancelled) setYears(y); }).catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!selectedYear) return;
+    let cancelled = false;
     setLoading(true);
     getAnualSchools(selectedYear)
-      .then(setSchools)
-      .catch(() => setSchools([]))
-      .finally(() => setLoading(false));
+      .then((s) => { if (!cancelled) setSchools(s); })
+      .catch(() => { if (!cancelled) setSchools([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [selectedYear]);
 
   const chartData = schools

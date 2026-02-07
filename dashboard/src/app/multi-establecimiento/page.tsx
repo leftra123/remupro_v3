@@ -12,7 +12,7 @@ import { useAppState } from "@/lib/store";
 import { formatCLP } from "@/lib/utils";
 
 export default function MultiEstablecimientoPage() {
-  const { multiEstablishment, sessionId, loadDemoData } = useAppState();
+  const { multiEstablishment, sessionId } = useAppState();
 
   if (!sessionId) {
     return (
@@ -21,7 +21,6 @@ export default function MultiEstablecimientoPage() {
           icon={Building2}
           title="No hay datos disponibles"
           description="Suba y procese archivos para ver docentes multi-establecimiento."
-          onDemo={loadDemoData}
         />
       </PageTransition>
     );

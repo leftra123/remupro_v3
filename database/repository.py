@@ -2,7 +2,6 @@
 Repositorio para operaciones CRUD sobre la base de datos de BRP.
 """
 
-import os
 import re
 from pathlib import Path
 from datetime import datetime
@@ -45,10 +44,22 @@ class BRPRepository:
 
         # Crear tablas si no existen
         Base.metadata.create_all(self.engine)
+        self._migrate()
 
     def _ensure_data_dir(self) -> None:
         """Crea el directorio data si no existe."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _migrate(self) -> None:
+        """Add missing columns to existing tables (lightweight migration)."""
+        from sqlalchemy import text, inspect as sa_inspect
+        insp = sa_inspect(self.engine)
+        cols = {c["name"] for c in insp.get_columns("procesamientos")}
+        with self.engine.begin() as conn:
+            if "daem_total" not in cols:
+                conn.execute(text("ALTER TABLE procesamientos ADD COLUMN daem_total FLOAT DEFAULT 0"))
+            if "cpeip_total" not in cols:
+                conn.execute(text("ALTER TABLE procesamientos ADD COLUMN cpeip_total FLOAT DEFAULT 0"))
 
     def _get_session(self) -> Session:
         """Obtiene una sesión de base de datos."""
@@ -106,6 +117,12 @@ class BRPRepository:
             tramo_total = sum(
                 df[col].sum() for col in tramo_cols if col in df.columns
             )
+
+            # DAEM vs CPEIP totals
+            daem_cols = ['TOTAL_DAEM_SEP', 'TOTAL_DAEM_PIE', 'TOTAL_DAEM_NORMAL']
+            cpeip_cols = ['TOTAL_CPEIP_SEP', 'TOTAL_CPEIP_PIE', 'TOTAL_CPEIP_NORMAL']
+            daem_total = sum(df[col].sum() for col in daem_cols if col in df.columns)
+            cpeip_total = sum(df[col].sum() for col in cpeip_cols if col in df.columns)
 
             # Detectar docentes EIB (BRP_TOTAL = 0)
             docentes_eib = len(df[df['BRP_TOTAL'] == 0]) if 'BRP_TOTAL' in df.columns else 0

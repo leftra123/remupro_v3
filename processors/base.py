@@ -78,11 +78,6 @@ class BaseProcessor(ABC):
                 f"Hoja '{sheet_name}' - Faltan columnas: {', '.join(sorted(missing))}"
             )
     
-    # Alias para compatibilidad
-    def verify_file(self, file_path: Path) -> None:
-        """Alias de validate_file para compatibilidad."""
-        self.validate_file(file_path)
-    
     # ==================== CARGA DE DATOS ====================
     
     def load_excel_with_retry(
@@ -200,11 +195,15 @@ class BaseProcessor(ABC):
         Returns:
             Serie con el valor calculado
         """
+        # Deduplicar columnas si existen duplicados (puede pasar tras merge)
+        if df.columns.duplicated().any():
+            df = df.loc[:, ~df.columns.duplicated(keep='first')]
+
         # Evitar división por cero
         with np.errstate(divide='ignore', invalid='ignore'):
             ratio = df[value_column] / df[total_hours_column]
             ratio = ratio.replace([np.inf, -np.inf, np.nan], 0)
-        
+
         result = (ratio * df[hours_column]).round().fillna(0).astype(int)
         return result
     

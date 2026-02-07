@@ -15,9 +15,6 @@ import pandas as pd
 
 from config.columns import normalize_rut, clean_columns, classify_contract
 
-# Alias para compatibilidad interna
-_classify_contract = classify_contract
-
 
 def _extract_rbd(departamento: str) -> str:
     """Extrae RBD del campo departamento (ej: 'ESCUELA X RBD 6710-5' → '6710')."""
@@ -116,7 +113,7 @@ class REMProcessor:
         if not tipo_col:
             raise ValueError("No se encontró columna 'tipocontrato' en el archivo REM.")
 
-        df['TIPO_SUBVENCION'] = df[tipo_col].apply(_classify_contract)
+        df['TIPO_SUBVENCION'] = df[tipo_col].apply(classify_contract)
 
         # Buscar columna jornada (horas)
         jornada_col = None

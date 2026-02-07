@@ -7,11 +7,13 @@ breakdowns, and Excel file downloads.
 
 import math
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
+import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from api.models import (
     AuditEntryResponse,
@@ -27,6 +29,26 @@ from api.session_store import store
 router = APIRouter(prefix="/api/results", tags=["results"])
 
 
+def _sanitize(obj: Any) -> Any:
+    """Recursively convert numpy types to native Python for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        v = float(obj)
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return v
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    return obj
+
+
 def _get_session_or_404(session_id: str):
     session = store.get_session(session_id)
     if session is None:
@@ -39,19 +61,8 @@ def _df_to_records(df: Optional[pd.DataFrame], limit: int = 50, offset: int = 0)
     if df is None or df.empty:
         return []
     subset = df.iloc[offset : offset + limit]
-    # Replace NaN/inf with None for JSON serialization
     records = subset.where(subset.notna(), None).to_dict(orient="records")
-    # Ensure all values are JSON-serializable
-    clean = []
-    for row in records:
-        clean_row = {}
-        for k, v in row.items():
-            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                clean_row[k] = None
-            else:
-                clean_row[k] = v
-        clean.append(clean_row)
-    return clean
+    return _sanitize(records)
 
 
 # ---------------------------------------------------------------------------
@@ -98,8 +109,8 @@ async def get_results(
         created_at=session.created_at.isoformat(),
         completed_at=session.completed_at.isoformat() if session.completed_at else None,
         summary=summary_model,
-        column_alerts=session.column_alerts,
-        docentes_revisar=session.docentes_revisar,
+        column_alerts=_sanitize(session.column_alerts),
+        docentes_revisar=_sanitize(session.docentes_revisar),
         data_preview=_df_to_records(session.result_df, limit, offset),
         total_rows=len(session.result_df) if session.result_df is not None else 0,
         error=session.error,
@@ -180,7 +191,7 @@ async def get_audit_log(
                 nivel=e.get("nivel", ""),
                 tipo=e.get("tipo", ""),
                 mensaje=e.get("mensaje", ""),
-                datos=datos,
+                datos=_sanitize(datos),
             )
         )
 
@@ -314,18 +325,43 @@ async def download_word(session_id: str):
         raise HTTPException(status_code=404, detail="No result data available")
 
     try:
+        from datetime import datetime as dt
         from reports.word_report import InformeWord
+        from reports.audit_log import AuditLog, AuditEntry
 
         fd, word_path = tempfile.mkstemp(suffix=".docx")
         os.close(fd)
 
+        # Reconstruct AuditLog from session audit_entries (list of dicts)
+        audit_log = AuditLog()
+        for entry_dict in (session.audit_entries or []):
+            ts = entry_dict.get("timestamp", "")
+            try:
+                timestamp = dt.fromisoformat(ts) if ts else dt.now()
+            except (ValueError, TypeError):
+                timestamp = dt.now()
+            datos = {k: v for k, v in entry_dict.items()
+                     if k not in ("timestamp", "nivel", "tipo", "mensaje")}
+            audit_log.entries.append(AuditEntry(
+                timestamp=timestamp,
+                nivel=entry_dict.get("nivel", "INFO"),
+                tipo=entry_dict.get("tipo", ""),
+                mensaje=entry_dict.get("mensaje", ""),
+                datos=datos,
+            ))
+
         informe = InformeWord()
-        informe.generar(session.result_df, word_path, resumen=session.summary)
+        mes = session.mes or "sin-mes"
+        buffer = informe.generar(mes, session.result_df, audit_log)
+
+        with open(word_path, "wb") as f:
+            f.write(buffer.read())
 
         return FileResponse(
             path=word_path,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename=f"informe_brp_{session_id[:8]}.docx",
+            background=BackgroundTask(os.unlink, word_path),
         )
     except ImportError:
         raise HTTPException(status_code=501, detail="Word report generator not available")

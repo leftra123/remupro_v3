@@ -64,10 +64,12 @@ export default function AlertasPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     async function fetchPreferences() {
       setIsLoading(true);
       try {
         const prefs = await getColumnPreferences();
+        if (cancelled) return;
         const prefMap = new Map(prefs.map((p) => [p.columna_key, p.estado as ColumnStatus]));
 
         const merged: ColumnRow[] = KNOWN_COLUMNS.map((col) => ({
@@ -90,6 +92,7 @@ export default function AlertasPage() {
 
         setColumns(merged);
       } catch {
+        if (cancelled) return;
         // If API fails, initialize with known columns at default status
         setColumns(
           KNOWN_COLUMNS.map((col) => ({
@@ -98,11 +101,12 @@ export default function AlertasPage() {
           }))
         );
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     }
 
     fetchPreferences();
+    return () => { cancelled = true; };
   }, []);
 
   function handleStatusChange(key: string, newStatus: ColumnStatus) {

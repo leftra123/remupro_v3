@@ -80,6 +80,8 @@ class AnualProcessor:
     def _find_col(self, df: pd.DataFrame, keywords: List[str]) -> Optional[str]:
         """Busca una columna por keywords (case-insensitive, substring)."""
         for col in df.columns:
+            if not isinstance(col, str):
+                continue
             col_lower = col.lower().strip()
             for kw in keywords:
                 if kw.lower() in col_lower:
@@ -170,9 +172,6 @@ class AnualProcessor:
         # Agregar por RUT + MES + TIPO + ESCUELA (puede haber duplicados)
         group_cols = ['RUT_NORM', 'NOMBRE', 'MES', 'TIPO_SUBVENCION', 'ESCUELA', 'RBD']
         num_cols = [c for c in available if c not in group_cols]
-
-        # Tomar nombre del primer registro
-        nombres = df_mensual.groupby('RUT_NORM')['NOMBRE'].first()
 
         agg_dict = {c: 'sum' for c in num_cols if c != 'NOMBRE'}
         agg_dict['NOMBRE'] = 'first'

@@ -47,28 +47,35 @@ export default function AnualPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     getAnualYears()
       .then((y) => {
+        if (cancelled) return;
         setYears(y);
         if (y.length > 0) setSelectedYear(y[0]);
       })
-      .catch(() => setYears([]))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!cancelled) setYears([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!selectedYear) return;
+    let cancelled = false;
     setLoading(true);
     Promise.all([getAnualSummary(selectedYear), getAnualTrends(selectedYear)])
       .then(([s, t]) => {
+        if (cancelled) return;
         setSummary(s);
         setTrends(t);
       })
       .catch(() => {
+        if (cancelled) return;
         setSummary(null);
         setTrends([]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [selectedYear]);
 
   if (loading && years.length === 0) {
