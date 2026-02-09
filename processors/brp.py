@@ -357,19 +357,31 @@ class BRPProcessor(BaseProcessor):
         return pd.DataFrame(resumen)
     
     def _load_web_sostenedor(self, path: Path) -> pd.DataFrame:
-        """Carga y valida el archivo web_sostenedor."""
+        """Carga y valida el archivo web_sostenedor (CSV o Excel)."""
         self.validate_file(path)
-        
-        xlsx = pd.ExcelFile(str(path), engine='openpyxl')
-        sheet_name = xlsx.sheet_names[0]
-        
-        # Intentar leer con header en fila 0, si falla probar fila 1
-        df = pd.read_excel(xlsx, sheet_name=sheet_name, header=0)
-        
-        # Si la primera columna no parece ser RBD, probar con header=1
-        if 'Rbd' not in str(df.columns[0]) and 'RBD' not in str(df.columns[0]).upper():
-            df = pd.read_excel(xlsx, sheet_name=sheet_name, header=1)
-        
+
+        if self.is_csv(path):
+            try:
+                df = pd.read_csv(str(path), encoding='utf-8')
+            except UnicodeDecodeError:
+                df = pd.read_csv(str(path), encoding='latin-1')
+            # Si la primera columna no parece ser RBD, probar con header=1
+            if 'Rbd' not in str(df.columns[0]) and 'RBD' not in str(df.columns[0]).upper():
+                try:
+                    df = pd.read_csv(str(path), encoding='utf-8', header=1)
+                except UnicodeDecodeError:
+                    df = pd.read_csv(str(path), encoding='latin-1', header=1)
+        else:
+            xlsx = pd.ExcelFile(str(path), engine='openpyxl')
+            sheet_name = xlsx.sheet_names[0]
+
+            # Intentar leer con header en fila 0, si falla probar fila 1
+            df = pd.read_excel(xlsx, sheet_name=sheet_name, header=0)
+
+            # Si la primera columna no parece ser RBD, probar con header=1
+            if 'Rbd' not in str(df.columns[0]) and 'RBD' not in str(df.columns[0]).upper():
+                df = pd.read_excel(xlsx, sheet_name=sheet_name, header=1)
+
         df.columns = df.columns.str.strip()
         
         # Buscar columnas de forma flexible
@@ -468,10 +480,16 @@ class BRPProcessor(BaseProcessor):
         return self.column_alerts
     
     def _load_processed_file(self, path: Path, tipo: str) -> pd.DataFrame:
-        """Carga archivo procesado (SEP o PIE)."""
+        """Carga archivo procesado (SEP o PIE) - CSV o Excel."""
         self.validate_file(path)
-        
-        df = pd.read_excel(str(path), engine='openpyxl')
+
+        if self.is_csv(path):
+            try:
+                df = pd.read_csv(str(path), encoding='utf-8')
+            except UnicodeDecodeError:
+                df = pd.read_csv(str(path), encoding='latin-1')
+        else:
+            df = pd.read_excel(str(path), engine='openpyxl')
         
         # Buscar columna RUT
         rut_col = None

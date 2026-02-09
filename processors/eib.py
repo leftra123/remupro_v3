@@ -91,7 +91,9 @@ class EIBProcessor(BaseProcessor):
             raise
 
     def _load_eib_sheet(self, file_path: Path) -> pd.DataFrame:
-        """Carga la hoja del archivo EIB (intenta 'Hoja1', luego primera hoja)."""
+        """Carga la hoja del archivo EIB (CSV o Excel)."""
+        if self.is_csv(file_path):
+            return self.load_datafile(file_path)
         try:
             return self.load_excel_with_retry(file_path, 'Hoja1')
         except (ValueError, KeyError):

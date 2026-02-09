@@ -53,18 +53,20 @@ class BaseProcessor(ABC):
     
     # ==================== VALIDACIÓN ====================
     
+    SUPPORTED_FORMATS = ('.xlsx', '.xls', '.csv')
+
     def validate_file(self, file_path: Path) -> None:
         """Realiza validaciones básicas del archivo."""
         if not file_path.exists():
             raise FileValidationError(f"Archivo no encontrado: {file_path}")
-        
+
         suffix = file_path.suffix.lower()
-        if suffix not in ('.xlsx', '.xls'):
+        if suffix not in self.SUPPORTED_FORMATS:
             raise FileValidationError(
                 f"Formato de archivo no válido: {suffix}. "
-                "Debe ser .xlsx o .xls"
+                "Debe ser .xlsx, .xls o .csv"
             )
-        
+
         if file_path.stat().st_size == 0:
             raise FileValidationError("El archivo está vacío")
     
@@ -114,7 +116,29 @@ class BaseProcessor(ABC):
                 time.sleep(delay)
         
         return pd.DataFrame()  # Nunca debería llegar aquí
-    
+
+    def load_datafile(self, file_path: Path, **read_kwargs) -> pd.DataFrame:
+        """
+        Carga un archivo de datos (CSV o Excel) y retorna un DataFrame limpio.
+
+        Para CSV intenta UTF-8 primero, luego latin-1.
+        Para Excel lee la primera hoja.
+        """
+        suffix = file_path.suffix.lower()
+        if suffix == '.csv':
+            try:
+                df = pd.read_csv(str(file_path), encoding='utf-8', **read_kwargs)
+            except UnicodeDecodeError:
+                df = pd.read_csv(str(file_path), encoding='latin-1', **read_kwargs)
+            return clean_columns(df)
+        # Excel
+        return self.load_excel_with_retry(file_path, 0, **read_kwargs)
+
+    @staticmethod
+    def is_csv(file_path: Path) -> bool:
+        """Retorna True si el archivo es CSV."""
+        return file_path.suffix.lower() == '.csv'
+
     def load_sheets(
         self, 
         file_path: Path

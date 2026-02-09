@@ -603,7 +603,7 @@ def format_user_error(e: Exception) -> str:
         if 'vacío' in error_str.lower() or 'empty' in error_str.lower():
             return "El archivo está vacío. Verifique que el archivo tiene datos."
         elif 'formato' in error_str.lower() or 'format' in error_str.lower():
-            return "El formato del archivo no es válido. Use un archivo Excel (.xlsx)."
+            return "El formato del archivo no es válido. Use un archivo Excel (.xlsx) o CSV (.csv)."
         elif 'no encontr' in error_str.lower() or 'not found' in error_str.lower():
             return "No se encontró el archivo. Vuelva a cargarlo."
         return f"Error de validación: {error_str}"
@@ -1077,9 +1077,10 @@ def process_files(processor, inputs: list):
     paths = []
     out_path = None
     try:
-        # Crear archivos temporales
+        # Crear archivos temporales (preserva extensión original para detección CSV/Excel)
         for f in inputs:
-            tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+            original_ext = Path(f.name).suffix or '.xlsx'
+            tmp = tempfile.NamedTemporaryFile(suffix=original_ext, delete=False)
             tmp.write(f.getvalue())
             paths.append(Path(tmp.name))
             tmp.close()
@@ -1149,24 +1150,33 @@ def tab_sep_pie():
     else:
         st.caption("El archivo debe contener las hojas **HORAS** y **TOTAL**")
     archivo = st.file_uploader(
-        "Arrastra o selecciona un archivo Excel",
-        type=['xlsx', 'xls'],
+        "Arrastra o selecciona un archivo (Excel o CSV)",
+        type=['xlsx', 'xls', 'csv'],
         key="sep_file"
     )
 
     if archivo:
+        is_csv = archivo.name.lower().endswith('.csv')
+
         if modo == "EIB":
-            # EIB: validar que tenga al menos 1 hoja con datos
-            try:
-                xlsx = pd.ExcelFile(archivo)
-                if not xlsx.sheet_names:
-                    st.error("❌ **Archivo incorrecto** - No contiene hojas")
+            # EIB: CSV o Excel con al menos 1 hoja
+            if is_csv:
+                st.success(f"✅ **{archivo.name}** - Archivo CSV válido")
+            else:
+                try:
+                    xlsx = pd.ExcelFile(archivo)
+                    if not xlsx.sheet_names:
+                        st.error("❌ **Archivo incorrecto** - No contiene hojas")
+                        return
+                    st.success(f"✅ **{archivo.name}** - Archivo válido (hoja: {xlsx.sheet_names[0]})")
+                except Exception as e:
+                    st.error(f"❌ **Error al leer archivo:** {e}")
                     return
-                st.success(f"✅ **{archivo.name}** - Archivo válido (hoja: {xlsx.sheet_names[0]})")
-            except Exception as e:
-                st.error(f"❌ **Error al leer archivo:** {e}")
-                return
         else:
+            # SEP/PIE requieren hojas HORAS+TOTAL (no disponible en CSV)
+            if is_csv:
+                st.error("❌ **SEP/PIE requieren un archivo Excel** con hojas HORAS y TOTAL. Los archivos CSV no tienen hojas.")
+                return
             ok, missing = check_sheets(archivo, ['HORAS', 'TOTAL'])
             if not ok:
                 st.error(f"❌ **Archivo incorrecto** - Faltan hojas: {', '.join(missing)}")
@@ -1226,8 +1236,8 @@ def tab_brp():
     # Uploader múltiple
     st.markdown("##### 📥 Cargar Archivos (arrástralos todos juntos)")
     uploaded_files = st.file_uploader(
-        "Arrastra los 3 archivos Excel",
-        type=['xlsx', 'xls'],
+        "Arrastra los 3 archivos (Excel o CSV)",
+        type=['xlsx', 'xls', 'csv'],
         accept_multiple_files=True,
         key="brp_multi_upload"
     )
@@ -1577,13 +1587,13 @@ def tab_duplicados():
     
     with col1:
         st.caption("📄 **Archivo Principal**")
-        f1 = st.file_uploader("Principal", type=['xlsx'], key="dup_1", label_visibility="collapsed")
+        f1 = st.file_uploader("Principal", type=['xlsx', 'xls', 'csv'], key="dup_1", label_visibility="collapsed")
         if f1:
             st.success(f"✓ {f1.name}")
     
     with col2:
         st.caption("📄 **Archivo Complementario**")
-        f2 = st.file_uploader("Complementario", type=['xlsx'], key="dup_2", label_visibility="collapsed")
+        f2 = st.file_uploader("Complementario", type=['xlsx', 'xls', 'csv'], key="dup_2", label_visibility="collapsed")
         if f2:
             st.success(f"✓ {f2.name}")
     
@@ -1639,8 +1649,8 @@ def tab_todo_en_uno():
     st.caption("Arrastra los 3 archivos: **SEP bruto**, **PIE bruto** y **web_sostenedor**")
 
     uploaded_files = st.file_uploader(
-        "Arrastra los 3 archivos Excel",
-        type=['xlsx', 'xls'],
+        "Arrastra los 3 archivos (Excel o CSV)",
+        type=['xlsx', 'xls', 'csv'],
         accept_multiple_files=True,
         key="todouno_multi_upload"
     )
@@ -2078,18 +2088,19 @@ def tab_lote_anual():
     )
 
     archivos = st.file_uploader(
-        "Arrastra o selecciona los archivos Excel",
-        type=['xlsx', 'xls'],
+        "Arrastra o selecciona los archivos (Excel o CSV)",
+        type=['xlsx', 'xls', 'csv'],
         accept_multiple_files=True,
         key="anual_files"
     )
 
     if archivos:
-        # Guardar archivos temporales y clasificar
+        # Guardar archivos temporales y clasificar (preserva extensión original)
         tmp_paths = []
         file_tuples = []
         for f in archivos:
-            tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+            original_ext = Path(f.name).suffix or '.xlsx'
+            tmp = tempfile.NamedTemporaryFile(suffix=original_ext, delete=False)
             tmp.write(f.getvalue())
             tmp.close()
             p = Path(tmp.name)
