@@ -21,7 +21,8 @@ class ColumnConfig:
     SEP_HOURS_COL: str = 'SEP'
     PIE_HOURS_COL: str = 'PIE'
     SN_HOURS_COL: str = 'SN'
-    
+    EIB_HOURS_COL: str = 'Jornada'
+
     # Límite máximo de horas permitidas
     MAX_HOURS: int = 44
 
@@ -217,6 +218,15 @@ MESES_MAP: Dict[str, str] = {
     'sep': '09', 'oct': '10', 'nov': '11', 'dic': '12',
 }
 
+MESES_FULL_MAP: Dict[str, str] = {
+    'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',
+    'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',
+    'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12',
+}
+
+# Inverso: número → nombre
+MESES_NUM_TO_NAME: Dict[str, str] = {v: k.capitalize() for k, v in MESES_FULL_MAP.items()}
+
 
 def parse_periodo(periodo: str) -> Optional[str]:
     """
@@ -237,4 +247,48 @@ def parse_periodo(periodo: str) -> Optional[str]:
     m = re.match(r'^(\d{4})-(\d{2})$', periodo)
     if m:
         return periodo
+    return None
+
+
+def detect_month_from_filename(filename: str) -> Optional[str]:
+    """
+    Detecta el mes (01-12) a partir del nombre de archivo.
+
+    Busca nombres completos ('enero', 'febrero') y abreviados ('ene', 'feb').
+    Retorna None si no detecta mes.
+    """
+    name = str(filename).lower()
+    # Primero intentar nombres completos (para evitar falsos positivos con abreviados)
+    for mes_name, mes_num in MESES_FULL_MAP.items():
+        if mes_name in name:
+            return mes_num
+    # Luego abreviados
+    for mes_abbr, mes_num in MESES_MAP.items():
+        if mes_abbr in name:
+            return mes_num
+    return None
+
+
+def detect_file_type(filename: str) -> Optional[str]:
+    """
+    Detecta el tipo de archivo por su nombre.
+
+    Retorna: 'web', 'sep', 'pie', 'eib', o None.
+    Nota: 'septiembre' no se confunde con 'sep' gracias a la verificación
+    de límite de palabra.
+    """
+    name = str(filename).lower()
+    # Eliminar nombres de meses completos para evitar falsos positivos
+    # (ej: 'septiembre' no debe matchear como tipo 'sep')
+    clean = name
+    for mes in MESES_FULL_MAP:
+        clean = clean.replace(mes, '')
+    if clean.startswith('web'):
+        return 'web'
+    if clean.startswith('sep') or '_sep' in clean or ' sep ' in f' {clean} ':
+        return 'sep'
+    if clean.startswith('sn') or 'pie' in clean or 'normal' in clean:
+        return 'pie'
+    if 'eib' in clean:
+        return 'eib'
     return None

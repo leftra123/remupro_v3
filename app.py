@@ -1,8 +1,9 @@
 """
-RemuPro v2.3 - Sistema de Procesamiento de Remuneraciones Educativas
+RemuPro v2.4 - Sistema de Procesamiento de Remuneraciones Educativas
 Interfaz Web con Streamlit
 """
 
+import socket
 import streamlit as st
 import pandas as pd
 from pathlib import Path
@@ -12,11 +13,12 @@ from datetime import datetime
 
 from processors import (
     SEPProcessor, PIEProcessor, DuplicadosProcessor,
-    BRPProcessor, IntegradoProcessor, REMProcessor
+    BRPProcessor, IntegradoProcessor, REMProcessor,
+    EIBProcessor, AnualBatchProcessor,
 )
 from reports import AuditLog, InformeWord
 from database import BRPRepository, ComparadorMeses
-from config.columns import format_rut
+from config.columns import format_rut, detect_month_from_filename, detect_file_type, MESES_NUM_TO_NAME
 from config.escuelas import get_rbd_map
 import html as html_module
 import json
@@ -41,7 +43,7 @@ def _sanitize_html(text: str) -> str:
 # CONFIGURACION
 # ============================================================================
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 
 st.set_page_config(
     page_title="RemuPro",
@@ -1117,52 +1119,71 @@ def process_files(processor, inputs: list):
 # ============================================================================
 
 def tab_sep_pie():
-    """Pestaña de procesamiento SEP/PIE."""
-    
+    """Pestaña de procesamiento SEP/PIE/EIB."""
+
     with st.expander("📖 ¿Cómo usar esta herramienta?", expanded=False):
         show_tutorial([
-            ("Selecciona el tipo", "Elige SEP o PIE-NORMAL según el archivo a procesar."),
-            ("Sube el archivo", "Debe ser un Excel con las hojas HORAS y TOTAL."),
+            ("Selecciona el tipo", "Elige SEP, PIE-NORMAL o EIB según el archivo a procesar."),
+            ("Sube el archivo", "SEP/PIE: Excel con hojas HORAS y TOTAL. EIB: Excel con Hoja1 y columna Jornada."),
             ("Procesa", "Haz clic en el botón verde y espera."),
             ("Descarga", "Guarda el archivo procesado en tu computador.")
         ])
-    
+
     st.markdown("---")
-    
+
     # Configuración
     col1, col2 = st.columns([1, 2])
     with col1:
         modo = st.selectbox(
             "📋 Tipo de procesamiento",
-            ["SEP", "PIE-NORMAL"],
-            help="SEP: Subvención Escolar Preferencial\nPIE-NORMAL: Programa de Integración + Subvención Normal"
+            ["SEP", "PIE-NORMAL", "EIB"],
+            help="SEP: Subvención Escolar Preferencial\nPIE-NORMAL: Programa de Integración + Subvención Normal\nEIB: Educación Intercultural Bilingüe"
         )
-    
+
     st.markdown("")
-    
+
     # Archivo
     st.markdown("##### 📁 Archivo de Entrada")
-    st.caption("El archivo debe contener las hojas **HORAS** y **TOTAL**")
+    if modo == "EIB":
+        st.caption("El archivo debe contener una hoja con datos y columna **Jornada**")
+    else:
+        st.caption("El archivo debe contener las hojas **HORAS** y **TOTAL**")
     archivo = st.file_uploader(
         "Arrastra o selecciona un archivo Excel",
         type=['xlsx', 'xls'],
         key="sep_file"
     )
-    
+
     if archivo:
-        ok, missing = check_sheets(archivo, ['HORAS', 'TOTAL'])
-        if not ok:
-            st.error(f"❌ **Archivo incorrecto** - Faltan hojas: {', '.join(missing)}")
-            return
-        
-        st.success(f"✅ **{archivo.name}** - Archivo válido")
-        
+        if modo == "EIB":
+            # EIB: validar que tenga al menos 1 hoja con datos
+            try:
+                xlsx = pd.ExcelFile(archivo)
+                if not xlsx.sheet_names:
+                    st.error("❌ **Archivo incorrecto** - No contiene hojas")
+                    return
+                st.success(f"✅ **{archivo.name}** - Archivo válido (hoja: {xlsx.sheet_names[0]})")
+            except Exception as e:
+                st.error(f"❌ **Error al leer archivo:** {e}")
+                return
+        else:
+            ok, missing = check_sheets(archivo, ['HORAS', 'TOTAL'])
+            if not ok:
+                st.error(f"❌ **Archivo incorrecto** - Faltan hojas: {', '.join(missing)}")
+                return
+            st.success(f"✅ **{archivo.name}** - Archivo válido")
+
         st.markdown("")
-        
+
         if st.button("▶️  PROCESAR ARCHIVO", key="btn_sep", use_container_width=True):
-            processor = SEPProcessor() if modo == "SEP" else PIEProcessor()
+            if modo == "EIB":
+                processor = EIBProcessor()
+            elif modo == "SEP":
+                processor = SEPProcessor()
+            else:
+                processor = PIEProcessor()
             df, error = process_files(processor, [archivo])
-            
+
             if error:
                 st.error(f"❌ **Error:** {error}")
             else:
@@ -1170,7 +1191,7 @@ def tab_sep_pie():
                 st.toast(f"{modo} procesado: {len(df)} registros", icon="✅")
 
                 nombre = f"{Path(archivo.name).stem}_procesado.xlsx"
-                
+
                 st.download_button(
                     "📥  DESCARGAR RESULTADO",
                     data=to_excel_buffer(df),
@@ -1178,7 +1199,7 @@ def tab_sep_pie():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
-                
+
                 with st.expander("👀 Vista previa del resultado"):
                     st.dataframe(df.head(15), use_container_width=True)
 
@@ -2030,6 +2051,177 @@ def tab_todo_en_uno():
                 st.code(traceback.format_exc())
 
 
+def tab_lote_anual():
+    """Pestaña de procesamiento anual por lotes."""
+
+    with st.expander("📖 ¿Cómo usar el Lote Anual?", expanded=False):
+        show_tutorial([
+            ("Prepara los archivos", "Necesitas ~4 archivos por mes: web sostenedor, SEP, PIE y opcionalmente EIB."),
+            ("Nombra los archivos", "Los archivos se detectan por nombre. Ejemplo: 'web enero 2026.xlsx', 'SEP ENERO 2026.xlsx', 'ENERO PIE 2026.xlsx', 'ENERO EIB 2026.xlsx'."),
+            ("Sube todos de golpe", "Arrastra todos los archivos al uploader (hasta 48 archivos)."),
+            ("Revisa la grilla", "Verifica que cada mes tenga al menos SEP, PIE y WEB. EIB es opcional."),
+            ("Procesa", "Haz clic en el botón y espera. Se procesarán todos los meses secuencialmente."),
+        ])
+
+    st.markdown("---")
+
+    # Año
+    col_anio, col_spacer = st.columns([1, 3])
+    with col_anio:
+        anio = st.number_input("Año", min_value=2020, max_value=2030, value=2026, key="anual_anio")
+
+    st.markdown("")
+    st.markdown("##### 📁 Archivos del Año")
+    st.caption(
+        "Sube todos los archivos del año. Se detectan automáticamente por nombre "
+        "(web*, sep*, *pie*/*sn*, *eib*) y mes (enero, febrero, etc.)"
+    )
+
+    archivos = st.file_uploader(
+        "Arrastra o selecciona los archivos Excel",
+        type=['xlsx', 'xls'],
+        accept_multiple_files=True,
+        key="anual_files"
+    )
+
+    if archivos:
+        # Guardar archivos temporales y clasificar
+        tmp_paths = []
+        file_tuples = []
+        for f in archivos:
+            tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+            tmp.write(f.getvalue())
+            tmp.close()
+            p = Path(tmp.name)
+            tmp_paths.append(p)
+            file_tuples.append((f.name, p))
+
+        processor = AnualBatchProcessor()
+        monthly = processor.classify_files(file_tuples)
+
+        # Mostrar grilla de detección
+        st.markdown("##### Detección de archivos")
+        grid_data = []
+        all_months = [f"{i:02d}" for i in range(1, 13)]
+        for m in all_months:
+            ms = monthly.get(m)
+            row = {
+                'Mes': MESES_NUM_TO_NAME.get(m, m),
+                'SEP': ms.sep[0] if ms and ms.sep else '',
+                'PIE': ms.pie[0] if ms and ms.pie else '',
+                'WEB': ms.web[0] if ms and ms.web else '',
+                'EIB': ms.eib[0] if ms and ms.eib else '(opcional)',
+            }
+            grid_data.append(row)
+
+        df_grid = pd.DataFrame(grid_data)
+        st.dataframe(df_grid, use_container_width=True, hide_index=True)
+
+        # Validar
+        errors = processor.validate_monthly_sets(monthly)
+        meses_listos = len(monthly) - len(errors)
+
+        if errors:
+            st.warning(f"Meses incompletos ({len(errors)}):")
+            for err in errors:
+                st.markdown(f"- {err}")
+
+        if not monthly:
+            st.error("No se detectaron meses válidos. Verifica los nombres de los archivos.")
+            _cleanup_temp_files(*tmp_paths)
+            return
+
+        st.markdown("")
+        col_info1, col_info2 = st.columns(2)
+        with col_info1:
+            st.metric("Meses detectados", len(monthly))
+        with col_info2:
+            st.metric("Meses listos", meses_listos)
+
+        # Solo procesar meses completos
+        meses_completos = {
+            k: v for k, v in monthly.items()
+            if v.sep and v.pie and v.web
+        }
+
+        if not meses_completos:
+            st.error("No hay meses con archivos completos (SEP + PIE + WEB).")
+            _cleanup_temp_files(*tmp_paths)
+            return
+
+        st.markdown("")
+        if st.button(
+            f"▶️  PROCESAR {len(meses_completos)} MESES",
+            key="btn_anual",
+            use_container_width=True
+        ):
+            progress = st.progress(0)
+            status = st.empty()
+
+            def callback(val, msg):
+                progress.progress(min(val, 100) / 100)
+                status.markdown(f"**{msg}**")
+
+            out_path = None
+            try:
+                out_tmp = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+                out_path = Path(out_tmp.name)
+                out_tmp.close()
+
+                stats = processor.process_all(meses_completos, out_path, callback)
+
+                # Mostrar resultados
+                success_box(
+                    f"Lote anual completado: **{stats['meses_procesados']}** meses procesados"
+                )
+
+                col_r1, col_r2, col_r3 = st.columns(3)
+                with col_r1:
+                    st.metric("BRP Total Anual", f"${stats['brp_total_anual']:,.0f}")
+                with col_r2:
+                    st.metric("Costo EIB Anual", f"${stats['eib_total_anual']:,.0f}")
+                with col_r3:
+                    st.metric("Meses con Error", stats['meses_error'])
+
+                # Gráfico de tendencia mensual
+                if stats['summaries']:
+                    df_trend = pd.DataFrame([
+                        s for s in stats['summaries'] if 'ERROR' not in s
+                    ])
+                    if not df_trend.empty and 'BRP_TOTAL' in df_trend.columns:
+                        st.markdown("##### Tendencia mensual BRP")
+                        chart_data = df_trend[['MES', 'BRP_SEP', 'BRP_PIE', 'BRP_NORMAL']].set_index('MES')
+                        st.bar_chart(chart_data)
+
+                # Descarga
+                with open(out_path, 'rb') as f:
+                    excel_bytes = f.read()
+
+                st.download_button(
+                    "📥  DESCARGAR RESULTADO ANUAL",
+                    data=excel_bytes,
+                    file_name=f"BRP_ANUAL_{anio}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+
+                # Mostrar errores si hubo
+                errores_mes = [s for s in stats['summaries'] if 'ERROR' in s]
+                if errores_mes:
+                    with st.expander(f"Errores ({len(errores_mes)} meses)"):
+                        for s in errores_mes:
+                            st.error(f"**{s['MES']}**: {s['ERROR']}")
+
+            except Exception as e:
+                st.error(f"Error en procesamiento anual: {e}")
+                import traceback
+                with st.expander("Ver detalles técnicos"):
+                    st.code(traceback.format_exc())
+
+            finally:
+                _cleanup_temp_files(*tmp_paths, out_path)
+
+
 def tab_calculadora():
     """Pestaña de calculadora interactiva BRP."""
 
@@ -2280,6 +2472,14 @@ def main():
         st.caption("DAEM = Subvención (municipio)")
         st.caption("CPEIP = Transferencia (ministerio)")
 
+        # Acceso en red local
+        st.markdown("---")
+        try:
+            local_ip = socket.gethostbyname(socket.gethostname())
+            st.caption(f"Red local: http://{local_ip}:8501")
+        except Exception:
+            pass
+
         # Charts dinámicos del último procesamiento
         st.markdown("---")
         show_sidebar_charts()
@@ -2287,11 +2487,12 @@ def main():
     show_header()
 
     # Tabs principales
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 SEP / PIE",
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📊 SEP / PIE / EIB",
         "💰 Distribución BRP",
         "🔄 Duplicados",
         "🎯 Todo en Uno",
+        "📅 Lote Anual",
         "🧮 Calculadora",
         "❓ Ayuda"
     ])
@@ -2309,9 +2510,12 @@ def main():
         tab_todo_en_uno()
 
     with tab5:
-        tab_calculadora()
+        tab_lote_anual()
 
     with tab6:
+        tab_calculadora()
+
+    with tab7:
         tab_ayuda()
 
     # Footer

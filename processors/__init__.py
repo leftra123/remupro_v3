@@ -10,6 +10,8 @@ from processors.brp import BRPProcessor
 from processors.integrado import IntegradoProcessor
 from processors.rem import REMProcessor
 from processors.anual import AnualProcessor
+from processors.eib import EIBProcessor
+from processors.anual_batch import AnualBatchProcessor
 
 __all__ = [
     'BaseProcessor',
@@ -22,4 +24,6 @@ __all__ = [
     'IntegradoProcessor',
     'REMProcessor',
     'AnualProcessor',
+    'EIBProcessor',
+    'AnualBatchProcessor',
 ]
