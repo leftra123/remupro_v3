@@ -34,20 +34,25 @@ class BRPProcessor(BaseProcessor):
         self.column_alerts = []
     
     def process_file(
-        self, 
-        web_sostenedor_path: Path, 
+        self,
+        web_sostenedor_path: Path,
         sep_procesado_path: Path,
         pie_procesado_path: Path,
-        output_path: Path, 
-        progress_callback: ProgressCallback
+        output_path: Path,
+        progress_callback: ProgressCallback,
+        month_filter: Optional[str] = None,
     ) -> None:
-        """Procesa y distribuye BRP."""
+        """Procesa y distribuye BRP.
+
+        Args:
+            month_filter: Mes a filtrar en web sostenedor ('01'-'12'). None = sin filtro.
+        """
         try:
             progress_callback(0, "Iniciando distribución BRP...")
-            
+
             # 1. Cargar archivos
             progress_callback(5, "Cargando archivo MINEDUC...")
-            df_web = self._load_web_sostenedor(web_sostenedor_path)
+            df_web = self._load_web_sostenedor(web_sostenedor_path, month_filter=month_filter)
             
             progress_callback(15, "Cargando archivo SEP procesado...")
             df_sep = self._load_processed_file(sep_procesado_path, 'SEP')
@@ -173,7 +178,12 @@ class BRPProcessor(BaseProcessor):
             cols_inicio.append(col_tramo)
         if col_horas and col_horas in df.columns:
             cols_inicio.append(col_horas)
-        
+
+        # Horas por subvención
+        for hcol in ['HORAS_SEP', 'HORAS_PIE', 'HORAS_SN']:
+            if hcol in df.columns:
+                cols_inicio.append(hcol)
+
         # Columnas MINEDUC originales (visibles al usuario)
         cols_mineduc = [
             'RECONOCIMIENTO_DIST', 'TRAMO_DIST', 'ASIG_PRIOR_DIST',
@@ -223,6 +233,7 @@ class BRPProcessor(BaseProcessor):
         # Columnas finales (excluyendo las ya agregadas y las internas)
         cols_excluir = set(cols_inicio + cols_mineduc_renamed + cols_multi + cols_brp + [
             'RUT_NORM', 'ES_MULTI', 'TOTAL_HORAS_MINEDUC',
+            'HORAS_SEP', 'HORAS_PIE', 'HORAS_SN',
             'RECONOCIMIENTO_DIST', 'TRAMO_DIST',
             'SUBV_RECON_DIST', 'TRANSF_RECON_DIST',
             'SUBV_TRAMO_DIST', 'TRANSF_TRAMO_DIST',
@@ -356,8 +367,12 @@ class BRPProcessor(BaseProcessor):
 
         return pd.DataFrame(resumen)
     
-    def _load_web_sostenedor(self, path: Path) -> pd.DataFrame:
-        """Carga y valida el archivo web_sostenedor (CSV o Excel)."""
+    def _load_web_sostenedor(self, path: Path, month_filter: Optional[str] = None) -> pd.DataFrame:
+        """Carga y valida el archivo web_sostenedor (CSV o Excel).
+
+        Args:
+            month_filter: Mes a filtrar ('01'-'12'). None = sin filtro.
+        """
         self.validate_file(path)
 
         if self.is_csv(path):
@@ -372,7 +387,11 @@ class BRPProcessor(BaseProcessor):
                 except UnicodeDecodeError:
                     df = pd.read_csv(str(path), encoding='latin-1', header=1)
         else:
-            xlsx = pd.ExcelFile(str(path), engine='openpyxl')
+            try:
+                xlsx = pd.ExcelFile(str(path), engine='openpyxl')
+            except TypeError:
+                # openpyxl puede fallar con estilos corruptos; usar calamine
+                xlsx = pd.ExcelFile(str(path), engine='calamine')
             sheet_name = xlsx.sheet_names[0]
 
             # Intentar leer con header en fila 0, si falla probar fila 1
@@ -383,7 +402,28 @@ class BRPProcessor(BaseProcessor):
                 df = pd.read_excel(xlsx, sheet_name=sheet_name, header=1)
 
         df.columns = df.columns.str.strip()
-        
+
+        # Filtrar por mes si se especifica
+        if month_filter:
+            mes_col = next((c for c in df.columns if c.strip().lower() == 'mes'), None)
+            if mes_col:
+                from config.columns import MESES_NUM_TO_NAME, normalize_month_value
+                month_name = MESES_NUM_TO_NAME.get(month_filter, '')
+                # Normalizar cada valor de la columna Mes a número y comparar
+                mask = df[mes_col].apply(
+                    lambda v: normalize_month_value(v) == month_filter
+                )
+                df = df[mask]
+                if df.empty:
+                    raise ProcessorError(
+                        f"No hay datos para {month_name or month_filter} en web sostenedor"
+                    )
+                df = df.reset_index(drop=True)
+                self.logger.info(
+                    f"Filtrado web sostenedor: {len(df)} filas para "
+                    f"{month_name or month_filter}"
+                )
+
         # Buscar columnas de forma flexible
         def find_col(target):
             target_lower = target.lower().strip()
@@ -761,6 +801,11 @@ class BRPProcessor(BaseProcessor):
             horas = horas_map.get(rut, {'SEP': 0, 'PIE': 0, 'SN': 0, 'TOTAL': 0})
             total_horas = horas['TOTAL']
 
+            # Exportar horas por subvención
+            df.at[idx, 'HORAS_SEP'] = horas['SEP']
+            df.at[idx, 'HORAS_PIE'] = horas['PIE']
+            df.at[idx, 'HORAS_SN'] = horas['SN']
+
             if total_horas == 0:
                 # Sin info de horas, todo va a NORMAL
                 df.at[idx, 'BRP_RECONOCIMIENTO_NORMAL'] = recon_dist
@@ -784,47 +829,42 @@ class BRPProcessor(BaseProcessor):
                 v_sn = total_val - v_sep - v_pie
                 return v_sep, v_pie, v_sn
 
-            # Reconocimiento total
-            s, p, n = split3(recon_dist)
-            df.at[idx, 'BRP_RECONOCIMIENTO_SEP'] = s
-            df.at[idx, 'BRP_RECONOCIMIENTO_PIE'] = p
-            df.at[idx, 'BRP_RECONOCIMIENTO_NORMAL'] = n
-
-            # Tramo total
-            s, p, n = split3(tramo_dist)
-            df.at[idx, 'BRP_TRAMO_SEP'] = s
-            df.at[idx, 'BRP_TRAMO_PIE'] = p
-            df.at[idx, 'BRP_TRAMO_NORMAL'] = n
-
-            # DAEM Reconocimiento (subvención)
+            # DAEM Reconocimiento (subvención) — distribuir por horas
             s, p, n = split3(subv_recon)
             df.at[idx, 'DAEM_RECON_SEP'] = s
             df.at[idx, 'DAEM_RECON_PIE'] = p
             df.at[idx, 'DAEM_RECON_NORMAL'] = n
 
-            # CPEIP Reconocimiento (transferencia)
-            s, p, n = split3(transf_recon)
-            df.at[idx, 'CPEIP_RECON_SEP'] = s
-            df.at[idx, 'CPEIP_RECON_PIE'] = p
-            df.at[idx, 'CPEIP_RECON_NORMAL'] = n
+            # CPEIP Reconocimiento (transferencia) — 100% Normal
+            df.at[idx, 'CPEIP_RECON_SEP'] = 0
+            df.at[idx, 'CPEIP_RECON_PIE'] = 0
+            df.at[idx, 'CPEIP_RECON_NORMAL'] = transf_recon
 
-            # DAEM Tramo (subvención)
+            # BRP Reconocimiento total = DAEM + CPEIP
+            df.at[idx, 'BRP_RECONOCIMIENTO_SEP'] = s
+            df.at[idx, 'BRP_RECONOCIMIENTO_PIE'] = p
+            df.at[idx, 'BRP_RECONOCIMIENTO_NORMAL'] = n + transf_recon
+
+            # DAEM Tramo (subvención) — distribuir por horas
             s, p, n = split3(subv_tramo)
             df.at[idx, 'DAEM_TRAMO_SEP'] = s
             df.at[idx, 'DAEM_TRAMO_PIE'] = p
             df.at[idx, 'DAEM_TRAMO_NORMAL'] = n
 
-            # CPEIP Tramo (transferencia)
-            s, p, n = split3(transf_tramo)
-            df.at[idx, 'CPEIP_TRAMO_SEP'] = s
-            df.at[idx, 'CPEIP_TRAMO_PIE'] = p
-            df.at[idx, 'CPEIP_TRAMO_NORMAL'] = n
+            # CPEIP Tramo (transferencia) — 100% Normal
+            df.at[idx, 'CPEIP_TRAMO_SEP'] = 0
+            df.at[idx, 'CPEIP_TRAMO_PIE'] = 0
+            df.at[idx, 'CPEIP_TRAMO_NORMAL'] = transf_tramo
 
-            # CPEIP Alumnos Prioritarios
-            s, p, n = split3(asig_prior)
-            df.at[idx, 'CPEIP_PRIOR_SEP'] = s
-            df.at[idx, 'CPEIP_PRIOR_PIE'] = p
-            df.at[idx, 'CPEIP_PRIOR_NORMAL'] = n
+            # BRP Tramo total = DAEM + CPEIP
+            df.at[idx, 'BRP_TRAMO_SEP'] = s
+            df.at[idx, 'BRP_TRAMO_PIE'] = p
+            df.at[idx, 'BRP_TRAMO_NORMAL'] = n + transf_tramo
+
+            # CPEIP Alumnos Prioritarios — 100% Normal
+            df.at[idx, 'CPEIP_PRIOR_SEP'] = 0
+            df.at[idx, 'CPEIP_PRIOR_PIE'] = 0
+            df.at[idx, 'CPEIP_PRIOR_NORMAL'] = asig_prior
 
         # Totales DAEM por subvención
         df['TOTAL_DAEM_SEP'] = df['DAEM_RECON_SEP'] + df['DAEM_TRAMO_SEP']
@@ -943,6 +983,40 @@ class BRPProcessor(BaseProcessor):
         # Ordenar por RUT y luego TIPO_FILA
         result = result.sort_values(['RUT', 'TIPO_FILA'], ascending=[True, True])
         return result
+
+    @staticmethod
+    def detect_web_months(path: Path) -> Optional[List[str]]:
+        """Detecta meses únicos en un archivo web sostenedor.
+
+        Returns:
+            Lista de month numbers ordenados (ej: ['01', '03']), o None si no tiene columna Mes.
+        """
+        try:
+            from config.columns import normalize_month_value
+
+            ext = path.suffix.lower()
+            if ext == '.csv':
+                try:
+                    df = pd.read_csv(str(path), encoding='utf-8', nrows=50000)
+                except UnicodeDecodeError:
+                    df = pd.read_csv(str(path), encoding='latin-1', nrows=50000)
+            else:
+                df = pd.read_excel(str(path), engine='openpyxl')
+
+            df.columns = df.columns.str.strip()
+            mes_col = next((c for c in df.columns if c.strip().lower() == 'mes'), None)
+            if not mes_col:
+                return None
+
+            raw_values = df[mes_col].dropna().unique()
+            month_nums = set()
+            for val in raw_values:
+                num = normalize_month_value(val)
+                if num:
+                    month_nums.add(num)
+            return sorted(month_nums) if month_nums else None
+        except Exception:
+            return None
 
     def _log_statistics(self, df: pd.DataFrame) -> None:
         """Genera estadísticas."""

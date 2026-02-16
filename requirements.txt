@@ -1,7 +1,8 @@
-# RemuPro v2.3 - Dependencias
+# RemuPro v2.5 - Dependencias
 pandas>=2.0.0
 numpy>=1.24.0
 openpyxl>=3.1.0
+python-calamine>=0.6.0  # Fallback para Excel con estilos corruptos
 streamlit>=1.28.0
 plotly>=5.18.0
 
@@ -9,3 +10,4 @@ plotly>=5.18.0
 python-docx>=0.8.11    # Generación de informes Word
 sqlalchemy>=2.0.0      # ORM para SQLite (almacenamiento histórico)
 matplotlib>=3.7.0      # Gráficos para informe Word
+fpdf2>=2.7.0           # Exportación PDF de tablas

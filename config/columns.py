@@ -250,6 +250,31 @@ def parse_periodo(periodo: str) -> Optional[str]:
     return None
 
 
+def normalize_month_value(value) -> Optional[str]:
+    """Normaliza un valor de mes (texto o número) a formato '01'-'12'.
+
+    Acepta: 'Enero', 'ENERO', 'enero', 'ene', 1, '1', '01', etc.
+    Retorna: '01'-'12' o None si no reconoce.
+    """
+    s = str(value).strip().lower()
+    if not s or s == 'nan':
+        return None
+    # Intentar como nombre completo
+    if s in MESES_FULL_MAP:
+        return MESES_FULL_MAP[s]
+    # Intentar como abreviatura
+    if s in MESES_MAP:
+        return MESES_MAP[s]
+    # Intentar como número
+    try:
+        n = int(float(s))
+        if 1 <= n <= 12:
+            return f"{n:02d}"
+    except (ValueError, OverflowError):
+        pass
+    return None
+
+
 def detect_month_from_filename(filename: str) -> Optional[str]:
     """
     Detecta el mes (01-12) a partir del nombre de archivo.
@@ -262,11 +287,19 @@ def detect_month_from_filename(filename: str) -> Optional[str]:
     for mes_name, mes_num in MESES_FULL_MAP.items():
         if mes_name in name:
             return mes_num
-    # Luego abreviados
+    # Luego abreviados (con lookbehind/lookahead para evitar falsos positivos
+    # como "sostenedor" → "ene". Se usa [a-záéíóúñ] en vez de \b porque
+    # \b trata '_' como caracter de palabra y no matchearía 'archivo_ene_2026')
     for mes_abbr, mes_num in MESES_MAP.items():
-        if mes_abbr in name:
+        if re.search(r'(?<![a-záéíóúñ])' + mes_abbr + r'(?![a-záéíóúñ])', name):
             return mes_num
     return None
+
+
+def detect_year_from_filename(filename: str) -> Optional[int]:
+    """Detecta año (4 dígitos entre 2015-2030) del nombre de archivo."""
+    m = re.search(r'(20[12]\d)', str(filename))
+    return int(m.group(1)) if m else None
 
 
 def detect_file_type(filename: str) -> Optional[str]:

@@ -48,20 +48,34 @@ def get_rbd_map() -> Dict[str, str]:
 def _normalize_school_name(name: str) -> str:
     """Normaliza nombre: uppercase, strip sufijos RBD/Nº/G Nº."""
     name = str(name).upper().strip()
+    # Expandir abreviaciones
+    name = re.sub(r'\bSTA\.?\b', 'SANTA', name)
+    # Quitar puntos sueltos
+    name = name.replace('.', '')
+    # Quitar palabras descriptivas que no están en escuelas.json
+    name = re.sub(r'\bESPECIAL\b\s*', '', name)
     # Quitar sufijo RBD XXXX-X
     name = re.sub(r'\s*RBD\s*\d+[-]?\d*\s*$', '', name)
     # Quitar sufijo Nº NNN o N° NNN
     name = re.sub(r'\s*(?:Nº|N°|NRO\.?)\s*\d+\s*$', '', name, flags=re.IGNORECASE)
     # Quitar sufijo G Nº NNN
     name = re.sub(r'\s*G\s*(?:Nº|N°)\s*\d+\s*$', '', name, flags=re.IGNORECASE)
+    # Quitar sufijo G N°NNN (sin espacio)
+    name = re.sub(r'\s*G\s*N°?\s*\d+\s*$', '', name, flags=re.IGNORECASE)
     # Quitar sufijo F NNN
     name = re.sub(r'\s*F\s+\d+\s*$', '', name)
     return name.strip()
 
 
 def _normalize_for_comparison(name: str) -> str:
-    """Quita TODOS los espacios para manejar typos como 'DEAILLINCO' vs 'DE AILLINCO'."""
-    return _normalize_school_name(name).replace(' ', '')
+    """Quita TODOS los espacios y artículos para manejar typos y variaciones."""
+    n = _normalize_school_name(name)
+    # Quitar artículos (con word boundaries ANTES de quitar espacios)
+    n = re.sub(r'\b(EL|LA|LOS|LAS)\b', '', n)
+    # Quitar letras sueltas (G, F) que quedan de sufijos tipo "G Nº"
+    n = re.sub(r'\b[A-Z]\b', '', n)
+    n = n.replace(' ', '')
+    return n
 
 
 def match_ubicacion(ubicacion: str) -> Optional[Tuple[str, str]]:
